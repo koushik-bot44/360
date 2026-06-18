@@ -1,0 +1,354 @@
+{
+  "id": "tour_6b398f5be5",
+  "title": "Smoke Test Room",
+  "details": {
+    "description": "Auto-generated from 12 photos using mock camera-pose estimation.",
+    "amenities": "Auto-generated, Camera poses, Node graph"
+  },
+  "floors": [
+    "Ground Floor"
+  ],
+  "startScene": "node_0",
+  "scenes": [
+    {
+      "id": "node_0",
+      "name": "Viewpoint 1",
+      "image": "http://testserver/files/tour_6b398f5be5/images/photo_00.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        {
+          "id": "edge_0_1",
+          "dir": {
+            "x": -0.2588190451025207,
+            "y": 0.0,
+            "z": -0.9659258262890683
+          },
+          "target": "node_1",
+          "label": "Go to photo_01.jpg"
+        },
+        {
+          "id": "edge_0_11",
+          "dir": {
+            "x": -0.258819045102521,
+            "y": 0.0,
+            "z": 0.9659258262890682
+          },
+          "target": "node_11",
+          "label": "Go to photo_11.jpg"
+        }
+      ]
+    },
+    {
+      "id": "node_1",
+      "name": "Viewpoint 2",
+      "image": "http://testserver/files/tour_6b398f5be5/images/photo_01.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        {
+          "id": "edge_1_0",
+          "dir": {
+            "x": -0.2588190451025208,
+            "y": 0.0,
+            "z": 0.9659258262890683
+          },
+          "target": "node_0",
+          "label": "Go to photo_00.jpg"
+        },
+        {
+          "id": "edge_1_2",
+          "dir": {
+            "x": -0.2588190451025208,
+            "y": 0.0,
+            "z": -0.9659258262890683
+          },
+          "target": "node_2",
+          "label": "Go to photo_02.jpg"
+        }
+      ]
+    },
+    {
+      "id": "node_2",
+      "name": "Viewpoint 3",
+      "image": "http://testserver/files/tour_6b398f5be5/images/photo_02.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        {
+          "id": "edge_2_1",
+          "dir": {
+            "x": -0.2588190451025208,
+            "y": 0.0,
+            "z": 0.9659258262890683
+          },
+          "target": "node_1",
+          "label": "Go to photo_01.jpg"
+        },
+        {
+          "id": "edge_2_3",
+          "dir": {
+            "x": -0.2588190451025208,
+            "y": 0.0,
+            "z": -0.9659258262890682
+          },
+          "target": "node_3",
+          "label": "Go to photo_03.jpg"
+        }
+      ]
+    },
+    {
+      "id": "node_3",
+      "name": "Viewpoint 4",
+      "image": "http://testserver/files/tour_6b398f5be5/images/photo_03.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        {
+          "id": "edge_3_4",
+          "dir": {
+            "x": -0.2588190451025208,
+            "y": 0.0,
+            "z": -0.9659258262890683
+          },
+          "target": "node_4",
+          "label": "Go to photo_04.jpg"
+        },
+        {
+          "id": "edge_3_2",
+          "dir": {
+            "x": -0.2588190451025208,
+            "y": 0.0,
+            "z": 0.9659258262890682
+          },
+          "target": "node_2",
+          "label": "Go to photo_02.jpg"
+        }
+      ]
+    },
+    {
+      "id": "node_4",
+      "name": "Viewpoint 5",
+      "image": "http://testserver/files/tour_6b398f5be5/images/photo_04.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        {
+          "id": "edge_4_3",
+          "dir": {
+            "x": -0.2588190451025207,
+            "y": 0.0,
+            "z": 0.9659258262890683
+          },
+          "target": "node_3",
+          "label": "Go to photo_03.jpg"
+        },
+        {
+          "id": "edge_4_5",
+          "dir": {
+            "x": -0.25881904510252074,
+            "y": 0.0,
+            "z": -0.9659258262890683
+          },
+          "target": "node_5",
+          "label": "Go to photo_05.jpg"
+        }
+      ]
+    },
+    {
+      "id": "node_5",
+      "name": "Viewpoint 6",
+      "image": "http://testserver/files/tour_6b398f5be5/images/photo_05.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        {
+          "id": "edge_5_6",
+          "dir": {
+            "x": -0.25881904510252074,
+            "y": 0.0,
+            "z": -0.9659258262890683
+          },
+          "target": "node_6",
+          "label": "Go to photo_06.jpg"
+        },
+        {
+          "id": "edge_5_4",
+          "dir": {
+            "x": -0.258819045102521,
+            "y": 0.0,
+            "z": 0.9659258262890682
+          },
+          "target": "node_4",
+          "label": "Go to photo_04.jpg"
+        }
+      ]
+    },
+    {
+      "id": "node_6",
+      "name": "Viewpoint 7",
+      "image": "http://testserver/files/tour_6b398f5be5/images/photo_06.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        {
+          "id": "edge_6_5",
+          "dir": {
+            "x": -0.25881904510252063,
+            "y": 0.0,
+            "z": 0.9659258262890683
+          },
+          "target": "node_5",
+          "label": "Go to photo_05.jpg"
+        },
+        {
+          "id": "edge_6_7",
+          "dir": {
+            "x": -0.25881904510252085,
+            "y": 0.0,
+            "z": -0.9659258262890682
+          },
+          "target": "node_7",
+          "label": "Go to photo_07.jpg"
+        }
+      ]
+    },
+    {
+      "id": "node_7",
+      "name": "Viewpoint 8",
+      "image": "http://testserver/files/tour_6b398f5be5/images/photo_07.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        {
+          "id": "edge_7_8",
+          "dir": {
+            "x": -0.2588190451025205,
+            "y": 0.0,
+            "z": -0.9659258262890683
+          },
+          "target": "node_8",
+          "label": "Go to photo_08.jpg"
+        },
+        {
+          "id": "edge_7_6",
+          "dir": {
+            "x": -0.2588190451025209,
+            "y": 0.0,
+            "z": 0.9659258262890682
+          },
+          "target": "node_6",
+          "label": "Go to photo_06.jpg"
+        }
+      ]
+    },
+    {
+      "id": "node_8",
+      "name": "Viewpoint 9",
+      "image": "http://testserver/files/tour_6b398f5be5/images/photo_08.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        {
+          "id": "edge_8_7",
+          "dir": {
+            "x": -0.2588190451025204,
+            "y": 0.0,
+            "z": 0.9659258262890684
+          },
+          "target": "node_7",
+          "label": "Go to photo_07.jpg"
+        },
+        {
+          "id": "edge_8_9",
+          "dir": {
+            "x": -0.2588190451025209,
+            "y": 0.0,
+            "z": -0.9659258262890683
+          },
+          "target": "node_9",
+          "label": "Go to photo_09.jpg"
+        }
+      ]
+    },
+    {
+      "id": "node_9",
+      "name": "Viewpoint 10",
+      "image": "http://testserver/files/tour_6b398f5be5/images/photo_09.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        {
+          "id": "edge_9_8",
+          "dir": {
+            "x": -0.25881904510252096,
+            "y": 0.0,
+            "z": 0.9659258262890682
+          },
+          "target": "node_8",
+          "label": "Go to photo_08.jpg"
+        },
+        {
+          "id": "edge_9_10",
+          "dir": {
+            "x": -0.25881904510252085,
+            "y": 0.0,
+            "z": -0.9659258262890682
+          },
+          "target": "node_10",
+          "label": "Go to photo_10.jpg"
+        }
+      ]
+    },
+    {
+      "id": "node_10",
+      "name": "Viewpoint 11",
+      "image": "http://testserver/files/tour_6b398f5be5/images/photo_10.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        {
+          "id": "edge_10_11",
+          "dir": {
+            "x": -0.2588190451025205,
+            "y": 0.0,
+            "z": -0.9659258262890683
+          },
+          "target": "node_11",
+          "label": "Go to photo_11.jpg"
+        },
+        {
+          "id": "edge_10_9",
+          "dir": {
+            "x": -0.25881904510252096,
+            "y": 0.0,
+            "z": 0.9659258262890683
+          },
+          "target": "node_9",
+          "label": "Go to photo_09.jpg"
+        }
+      ]
+    },
+    {
+      "id": "node_11",
+      "name": "Viewpoint 12",
+      "image": "http://testserver/files/tour_6b398f5be5/images/photo_11.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        {
+          "id": "edge_11_10",
+          "dir": {
+            "x": -0.2588190451025204,
+            "y": 0.0,
+            "z": 0.9659258262890684
+          },
+          "target": "node_10",
+          "label": "Go to photo_10.jpg"
+        },
+        {
+          "id": "edge_11_0",
+          "dir": {
+            "x": -0.258819045102521,
+            "y": 0.0,
+            "z": -0.9659258262890682
+          },
+          "target": "node_0",
+          "label": "Go to photo_00.jpg"
+        }
+      ]
+    }
+  ],
+  "_meta": {
+    "engine": "mock",
+    "generated": true
+  }
+}
