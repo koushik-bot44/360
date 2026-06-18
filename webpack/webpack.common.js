@@ -34,6 +34,12 @@ module.exports = {
         path: path.resolve(__dirname, '../../static/webpack_bundles')
     },
     devtool: 'source-map',
+    // The Matterport SDK emits a harmless "Critical dependency" warning; ignore
+    // it so it doesn't trip the dev-server error overlay (which would block the UI).
+    ignoreWarnings: [
+        { module: /@matterport[\\/]sdk/ },
+        /Critical dependency: the request of a dependency is an expression/,
+    ],
     plugins:
     [
         new CopyWebpackPlugin({

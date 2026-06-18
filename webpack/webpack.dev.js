@@ -22,6 +22,9 @@ module.exports = merge(
             allowedHosts: 'all',
             port: 3000,
             open: true,
+            // Never let the dev overlay cover the app; show build errors in the
+            // terminal instead, and never for warnings.
+            client: { overlay: { errors: false, warnings: false } },
             // Serve the generated app (and copied static assets) from the
             // root URL so the tour is available at http://localhost:3000/
             static: {
