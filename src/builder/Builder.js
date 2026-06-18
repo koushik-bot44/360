@@ -18,22 +18,23 @@ export default class Builder {
     this.placing = false;
     this.activeFloor = null;
     this.capture = new Capture((result) => this._onCaptured(result));
+    this._boot();
+  }
 
-    // boot into play mode if a ?view=<id> link was shared
+  // storage (IndexedDB) loads asynchronously
+  async _boot() {
     const params = new URLSearchParams(location.search);
     const viewId = params.get('view');
     const tourUrl = params.get('tour');
 
-    if (tourUrl) {
-      this._loadFromUrl(tourUrl);
-      return;
-    }
+    if (tourUrl) { this._loadFromUrl(tourUrl); return; }
+
     if (viewId) {
-      const store = TourStore.load(viewId);
-      if (store) { this.store = store; this._enterPlay(true); this._wireGlobal(); return; }
+      const store = await TourStore.load(viewId);
+      if (store) { this.store = store; this._wireGlobal(); this._enterPlay(true); return; }
     }
 
-    this.store = TourStore.loadLatest() || new TourStore();
+    this.store = (await TourStore.loadLatest()) || new TourStore();
     this._wire();
     this._wireGlobal();
     this.refresh();
@@ -354,8 +355,8 @@ export default class Builder {
   }
 
   // ---------- share ----------
-  _share() {
-    this._persist();
+  async _share() {
+    await this._persist();   // ensure it's written before the link is used
     const link = `${location.origin}${location.pathname}?view=${this.store.tour.id}`;
     const note = $('share-note');
     navigator.clipboard?.writeText(link).then(() => {
@@ -390,7 +391,14 @@ export default class Builder {
     this._renderHotspots();
   }
 
-  _persist() { this.store.save(); }
+  _persist() {
+    return this.store.save().catch((e) => {
+      const note = $('share-note');
+      note.textContent = 'Could not save — storage may be full. Export your tour to keep it.';
+      note.classList.remove('hidden');
+      setTimeout(() => note.classList.add('hidden'), 6000);
+    });
+  }
   _clearStage() { this.currentSceneId = null; this.viewer.clearHotspots(); this.viewer.sphereMat.map = null; this.viewer.sphereMat.color.set(0x111111); this.viewer.sphereMat.needsUpdate = true; }
   _emptyHint(on) { $('empty-state').classList.toggle('hidden', !on); }
   _esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }

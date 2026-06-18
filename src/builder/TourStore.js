@@ -6,7 +6,10 @@
  * exported to / imported from a self-contained .json file (images embedded as
  * data URLs) for sharing.
  */
-const LS_KEY = 'vt_tours';
+import { idbSet, idbGet, idbDelete, idbAll } from './idb';
+
+const LS_KEY = 'vt_tours';        // legacy localStorage key (migrated on first load)
+let _migrated = false;
 
 function uid(prefix) {
   // no Date.now()/Math.random reliance needed here, but fine in the browser
@@ -103,27 +106,55 @@ export default class TourStore {
     if (s) s.hotspots = s.hotspots.filter(h => h.id !== hotspotId);
   }
 
-  // ---- persistence ----
-  save() {
-    const all = TourStore.all();
-    all[this.tour.id] = this.tour;
-    localStorage.setItem(LS_KEY, JSON.stringify(all));
+  // ---- persistence (IndexedDB, async) ----
+  async save() {
+    this.tour.updatedAt = Date.now();
+    try {
+      await idbSet(this.tour.id, this.tour);
+    } catch (e) {
+      console.error('Save failed (storage quota?):', e);
+      throw e;
+    }
   }
 
-  static all() {
-    try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; }
-    catch (e) { return {}; }
+  async delete() { try { await idbDelete(this.tour.id); } catch (e) { /* ignore */ } }
+
+  // one-time import of any tours that were saved in localStorage before the
+  // move to IndexedDB
+  static async _migrate() {
+    if (_migrated) return;
+    _migrated = true;
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return;
+      const map = JSON.parse(raw) || {};
+      for (const id of Object.keys(map)) {
+        if (!(await idbGet(id))) await idbSet(id, map[id]);
+      }
+      localStorage.removeItem(LS_KEY); // migrated; free the space
+    } catch (e) { /* ignore */ }
   }
 
-  static load(id) {
-    const t = TourStore.all()[id];
+  static async all() {
+    await TourStore._migrate();
+    const list = await idbAll();
+    const map = {};
+    list.forEach((t) => { if (t && t.id) map[t.id] = t; });
+    return map;
+  }
+
+  static async load(id) {
+    await TourStore._migrate();
+    const t = await idbGet(id);
     return t ? new TourStore(t) : null;
   }
 
-  static loadLatest() {
-    const all = TourStore.all();
-    const ids = Object.keys(all);
-    return ids.length ? new TourStore(all[ids[ids.length - 1]]) : null;
+  static async loadLatest() {
+    const all = await TourStore.all();
+    const tours = Object.values(all);
+    if (!tours.length) return null;
+    tours.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    return new TourStore(tours[0]);
   }
 
   // ---- export / import ----
