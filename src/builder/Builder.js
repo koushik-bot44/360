@@ -16,6 +16,7 @@ export default class Builder {
     this.viewer = new PanoViewer($('pano-canvas'));
     this.currentSceneId = null;
     this.placing = false;
+    this.activeFloor = null;
     this.capture = new Capture((result) => this._onCaptured(result));
 
     // boot into play mode if a ?view=<id> link was shared
@@ -58,6 +59,15 @@ export default class Builder {
     $('capture-room-btn').addEventListener('click', () => this._startCapture());
     $('empty-capture-btn').addEventListener('click', () => this._startCapture());
 
+    $('add-floor-btn').addEventListener('click', () => {
+      const name = prompt('Floor name? (e.g. First Floor, Basement)');
+      if (!name) return;
+      this.activeFloor = this.store.addFloor(name);
+      this._persist();
+      this._renderFloors();
+      this._renderScenes();
+    });
+
     $('add-hotspot-btn').addEventListener('click', () => this._togglePlacing());
     $('preview-btn').addEventListener('click', () => this._enterPlay(false));
     $('exit-play-btn').addEventListener('click', () => this._exitPlay());
@@ -81,7 +91,7 @@ export default class Builder {
     list.forEach((file) => {
       const reader = new FileReader();
       reader.onload = () => {
-        const scene = this.store.addScene(file.name.replace(/\.[^.]+$/, ''), reader.result);
+        const scene = this.store.addScene(file.name.replace(/\.[^.]+$/, ''), reader.result, this.activeFloor);
         pending--;
         if (pending === 0) {
           this._persist();
@@ -107,7 +117,7 @@ export default class Builder {
     note.textContent = 'Assembling your 360° room…';
     note.classList.remove('hidden');
     cubeToEquirect(result.faces).then((dataUrl) => {
-      const scene = this.store.addScene(result.roomName, dataUrl);
+      const scene = this.store.addScene(result.roomName, dataUrl, this.activeFloor);
       this._persist();
       this.refresh();
       this.selectScene(scene.id);
@@ -139,33 +149,64 @@ export default class Builder {
     if (!scene) return;
     this._setPlacing(false);
     this.viewer.mode = 'view';
+    this.activeFloor = scene.floor;
     this.viewer.loadPanorama(scene.image).then(() => {
       this.viewer.setHotspots(scene.hotspots);
     });
+    this._renderFloors();
     this._renderScenes();
     this._renderHotspots();
     $('current-scene-name').textContent = scene.name;
   }
 
+  _renderFloors() {
+    const floors = this.store.getFloors();
+    if (!this.activeFloor || !floors.includes(this.activeFloor)) this.activeFloor = floors[0];
+    const wrap = $('floor-pills');
+    wrap.innerHTML = '';
+    floors.forEach((f) => {
+      const count = this.store.scenesOnFloor(f).length;
+      const pill = document.createElement('button');
+      pill.className = 'floor-pill' + (f === this.activeFloor ? ' active' : '');
+      pill.textContent = `${f} (${count})`;
+      pill.addEventListener('click', () => { this.activeFloor = f; this._renderFloors(); this._renderScenes(); });
+      pill.addEventListener('dblclick', () => {
+        const nn = prompt('Rename floor', f);
+        if (nn) { this.store.renameFloor(f, nn); this.activeFloor = nn.trim(); this._persist(); this._renderFloors(); this._renderScenes(); }
+      });
+      wrap.appendChild(pill);
+    });
+  }
+
   _renderScenes() {
     const wrap = $('scene-list');
     wrap.innerHTML = '';
-    this.store.tour.scenes.forEach((s) => {
+    const floors = this.store.getFloors();
+    const scenes = this.store.scenesOnFloor(this.activeFloor);
+    if (!scenes.length) {
+      wrap.innerHTML = '<div class="muted small" style="padding:6px 2px">No rooms on this floor yet. Upload a 360° photo to add one.</div>';
+    }
+    scenes.forEach((s) => {
       const el = document.createElement('div');
       el.className = 'scene-item' + (s.id === this.currentSceneId ? ' active' : '');
       const isStart = this.store.tour.startScene === s.id;
+      const floorOpts = floors.map(f => `<option value="${this._esc(f)}" ${s.floor === f ? 'selected' : ''}>${this._esc(f)}</option>`).join('');
       el.innerHTML = `
         <img class="scene-thumb" src="${s.image}" alt="">
         <div class="scene-meta">
           <div class="scene-name">${this._esc(s.name)}</div>
           <div class="scene-sub">${s.hotspots.length} hotspot${s.hotspots.length === 1 ? '' : 's'}${isStart ? ' · start' : ''}</div>
+          <select class="scene-floor" title="Move to floor">${floorOpts}</select>
         </div>
         <div class="scene-actions">
-          <button class="mini ${isStart ? 'on' : ''}" data-act="start" title="Set as starting scene">★</button>
-          <button class="mini" data-act="del" title="Delete scene">✕</button>
+          <button class="mini ${isStart ? 'on' : ''}" data-act="start" title="Set as starting room">★</button>
+          <button class="mini" data-act="del" title="Delete room">✕</button>
         </div>`;
       el.querySelector('.scene-thumb').addEventListener('click', () => this.selectScene(s.id));
-      el.querySelector('.scene-meta').addEventListener('click', () => this.selectScene(s.id));
+      el.querySelector('.scene-name').addEventListener('click', () => this.selectScene(s.id));
+      el.querySelector('.scene-floor').addEventListener('change', (ev) => {
+        this.store.setSceneFloor(s.id, ev.target.value); this._persist(); this._renderFloors(); this._renderScenes();
+      });
       el.querySelector('[data-act="start"]').addEventListener('click', (ev) => {
         ev.stopPropagation(); this.store.setStart(s.id); this._persist(); this._renderScenes();
       });
@@ -173,7 +214,7 @@ export default class Builder {
         ev.stopPropagation();
         if (!confirm(`Delete "${s.name}"?`)) return;
         this.store.removeScene(s.id); this._persist(); this.refresh();
-        const next = this.store.tour.scenes[0];
+        const next = this.store.scenesOnFloor(this.activeFloor)[0] || this.store.tour.scenes[0];
         if (next) this.selectScene(next.id); else { this._clearStage(); this._emptyHint(true); }
       });
       wrap.appendChild(el);
@@ -251,6 +292,7 @@ export default class Builder {
     $('play-title').textContent = this.store.tour.title || 'Virtual Tour';
     $('exit-play-btn').classList.toggle('hidden', !!fromShare);
     this._renderPlayInfo();
+    this._renderPlayFloors();
     this.viewer.resize();
   }
 
@@ -270,7 +312,26 @@ export default class Builder {
       // only show hotspots that actually lead somewhere
       this.viewer.setHotspots(scene.hotspots.filter(h => h.target));
       c.style.opacity = '1';
-      $('play-scene-name').textContent = scene.name;
+      $('play-scene-name').textContent = `${scene.name} · ${scene.floor}`;
+    });
+    this._renderPlayFloors();
+  }
+
+  _renderPlayFloors() {
+    const floors = this.store.getFloors().filter(f => this.store.scenesOnFloor(f).length);
+    const wrap = $('play-floors');
+    const cur = this.store.getScene(this.currentSceneId);
+    wrap.innerHTML = '';
+    if (floors.length < 2) return;   // only show when there's more than one floor
+    floors.forEach((f) => {
+      const b = document.createElement('button');
+      b.className = 'play-floor' + (cur && cur.floor === f ? ' active' : '');
+      b.textContent = f;
+      b.addEventListener('click', () => {
+        const first = this.store.scenesOnFloor(f)[0];
+        if (first) this._playLoad(first.id);
+      });
+      wrap.appendChild(b);
     });
   }
 
@@ -318,6 +379,7 @@ export default class Builder {
     $('tour-title').value = this.store.tour.title || '';
     $('tour-desc').value = (this.store.tour.details && this.store.tour.details.description) || '';
     $('tour-amenities').value = (this.store.tour.details && this.store.tour.details.amenities) || '';
+    this._renderFloors();
     this._renderScenes();
     this._renderHotspots();
   }

@@ -40,10 +40,16 @@
         <h3>Rooms / Scenes</h3>
       </div>
       <div class="add-row">
-        <button id="capture-room-btn" class="btn tiny solid">📷 Capture room</button>
-        <button id="add-photos-btn" class="btn tiny">+ Upload 360°</button>
+        <button id="add-photos-btn" class="btn tiny solid">＋ Upload 360°</button>
+        <button id="capture-room-btn" class="btn tiny" title="Experimental: guided phone capture (assembled result may show seams)">📷 Capture</button>
       </div>
       <input id="upload-input" type="file" accept="image/*" multiple class="sr-only" />
+
+      <div class="floor-bar">
+        <div id="floor-pills" class="floor-pills"></div>
+        <button id="add-floor-btn" class="mini" title="Add a floor">＋</button>
+      </div>
+
       <div id="scene-list" class="scene-list"></div>
 
       <details class="details-panel">
@@ -73,11 +79,12 @@
         <div class="empty-card">
           <div class="empty-emoji">🖼️</div>
           <h2>Start your virtual tour</h2>
-          <p>Capture a room with your phone camera, or upload 360° photos you already have. Each becomes a room you can connect with hotspots.</p>
+          <p>Upload 360° photos (from any 360 camera or your phone's Photo&nbsp;Sphere mode) — each becomes a room you connect with hotspots. This gives the cleanest, seam-free result.</p>
           <div class="empty-actions">
-            <button id="empty-capture-btn" class="btn solid">📷 Capture a room</button>
-            <button id="empty-upload-btn" class="btn">Upload 360° photos</button>
+            <button id="empty-upload-btn" class="btn solid">＋ Upload 360° photos</button>
+            <button id="empty-capture-btn" class="btn">📷 Try phone capture</button>
           </div>
+          <p class="empty-hint muted small">Phone capture is experimental — it assembles several shots and may show seams.</p>
         </div>
       </div>
     </section>
@@ -139,6 +146,7 @@
         <div id="play-title" class="play-title">Virtual Tour</div>
         <div id="play-scene-name" class="play-scene">—</div>
       </div>
+      <div id="play-floors" class="play-floors"></div>
       <div class="play-actions">
         <button id="play-info-btn" class="hud-btn" title="Property details">i</button>
         <button id="exit-play-btn" class="btn ghost light">✕ Exit preview</button>

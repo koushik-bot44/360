@@ -19,15 +19,49 @@ export default class TourStore {
       id: uid('tour'),
       title: 'My Virtual Tour',
       details: { description: '', amenities: '' },
+      floors: ['Ground Floor'],
       startScene: null,
       scenes: [],
     };
     if (!this.tour.details) this.tour.details = { description: '', amenities: '' };
+    // migrate older tours that predate floors
+    if (!this.tour.floors || !this.tour.floors.length) this.tour.floors = ['Ground Floor'];
+    this.tour.scenes.forEach(s => { if (!s.floor) s.floor = this.tour.floors[0]; });
   }
 
+  // ---- floors ----
+  getFloors() { return this.tour.floors || ['Ground Floor']; }
+  addFloor(name) {
+    name = (name || '').trim();
+    if (!name || this.tour.floors.includes(name)) return name;
+    this.tour.floors.push(name);
+    return name;
+  }
+  renameFloor(oldName, newName) {
+    newName = (newName || '').trim();
+    if (!newName) return;
+    const i = this.tour.floors.indexOf(oldName);
+    if (i >= 0) this.tour.floors[i] = newName;
+    this.tour.scenes.forEach(s => { if (s.floor === oldName) s.floor = newName; });
+  }
+  removeFloor(name) {
+    if (this.tour.floors.length <= 1) return;
+    this.tour.floors = this.tour.floors.filter(f => f !== name);
+    const fallback = this.tour.floors[0];
+    this.tour.scenes.forEach(s => { if (s.floor === name) s.floor = fallback; });
+  }
+  setSceneFloor(sceneId, floor) { const s = this.getScene(sceneId); if (s) s.floor = floor; }
+  scenesOnFloor(floor) { return this.tour.scenes.filter(s => s.floor === floor); }
+
   // ---- scenes ----
-  addScene(name, image) {
-    const scene = { id: uid('scn'), name: name || `Scene ${this.tour.scenes.length + 1}`, image, hotspots: [] };
+  addScene(name, image, floor) {
+    const scene = {
+      id: uid('scn'),
+      name: name || `Scene ${this.tour.scenes.length + 1}`,
+      image,
+      floor: floor || this.tour.floors[0],
+      hotspots: [],
+    };
     this.tour.scenes.push(scene);
     if (!this.tour.startScene) this.tour.startScene = scene.id;
     return scene;
