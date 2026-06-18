@@ -108,67 +108,41 @@ export default class Capture {
     $('cap-progress').textContent = `${done}/${TARGETS.length}`;
     this.needle.style.transform = `rotate(${this.az}deg)`;
 
-    let nearest = null;
+    // Dots live in the world around you. Project each onto the screen by how
+    // far it is from where you're currently facing — so only the dot(s) in
+    // front are visible; you turn (gyro on a phone, drag on desktop) to bring
+    // the target into the crosshair.
+    let nearest = null, nearestDist = Infinity;
+    remaining.forEach(t => {
+      const dist = Math.hypot(angDiff(t.az, this.az), t.el - this.el);
+      if (dist < nearestDist) { nearestDist = dist; nearest = t; }
+    });
 
-    if (this.hasOrientation) {
-      // ---- guided: project dots by phone orientation ----
-      let nearestDist = Infinity;
-      remaining.forEach(t => {
-        const daz = angDiff(t.az, this.az);
-        const dele = t.el - this.el;
-        const dist = Math.hypot(daz, dele);
-        if (dist < nearestDist) { nearestDist = dist; nearest = t; }
-      });
-      TARGETS.forEach(t => {
-        const dot = this.dots[t.key];
-        const daz = angDiff(t.az, this.az);
-        const dele = t.el - this.el;
-        const x = 50 + (daz / FOV) * 50;
-        const y = 50 - (dele / FOV) * 50;
-        const onscreen = x > -8 && x < 108 && y > -8 && y < 108;
-        dot.style.display = onscreen ? 'flex' : 'none';
-        dot.style.left = x + '%';
-        dot.style.top = y + '%';
-      });
-      const locked = nearest && nearestDist < LOCK_ANGLE;
-      this.crosshair.classList.toggle('locked', !!locked);
-      this._target = nearest;
-      $('cap-guidance').textContent = nearest
-        ? (locked ? `Hold steady — capturing ${nearest.label} ✓` : `Rotate to aim at: ${nearest.label}`)
-        : 'All directions captured — tap Finish';
-      $('cap-shoot').disabled = !locked;
-    } else {
-      // ---- manual / desktop: fixed clickable ring of dots ----
-      TARGETS.forEach(t => {
-        const dot = this.dots[t.key];
-        dot.style.display = 'flex';
-        let x, y;
-        if (t.el > 60) { x = 50; y = 9; }
-        else if (t.el < -60) { x = 50; y = 91; }
-        else {
-          const rad = t.az * Math.PI / 180;
-          x = 50 + 33 * Math.sin(rad);
-          y = 50 - 30 * Math.cos(rad);
-        }
-        dot.style.left = x + '%';
-        dot.style.top = y + '%';
-      });
-      nearest = remaining[0] || null;
-      this.crosshair.classList.remove('locked');
-      $('cap-guidance').textContent = remaining.length
-        ? `Aim your camera, then tap a dot to capture (${remaining.length} left)`
-        : 'All directions captured — tap Finish';
-      $('cap-shoot').disabled = true;
-    }
-
-    // dot states
     TARGETS.forEach(t => {
       const dot = this.dots[t.key];
+      const daz = angDiff(t.az, this.az);
+      const dele = t.el - this.el;
+      const x = 50 + (daz / FOV) * 50;
+      const y = 50 - (dele / FOV) * 50;
+      const onscreen = x > -6 && x < 106 && y > -6 && y < 106;
+      dot.style.display = onscreen ? 'flex' : 'none';
+      dot.style.left = x + '%';
+      dot.style.top = y + '%';
       dot.classList.remove('current', 'done', 'pending');
       if (this.captured[t.key]) dot.classList.add('done');
       else if (t === nearest) dot.classList.add('current');
       else dot.classList.add('pending');
     });
+
+    const locked = nearest && nearestDist < LOCK_ANGLE;
+    this.crosshair.classList.toggle('locked', !!locked);
+    this._target = nearest;
+    const how = this.hasOrientation ? 'Turn' : 'Drag';
+    $('cap-guidance').textContent = nearest
+      ? (locked ? `Aligned — press the shutter to capture ${nearest.label} ✓`
+                : `${how} to bring “${nearest.label}” into the crosshair`)
+      : 'All directions captured — press Finish';
+    $('cap-shoot').disabled = !locked;
   }
 
   // ---------- capture ----------
@@ -268,6 +242,20 @@ export default class Capture {
     $('cap-shoot').addEventListener('click', () => this.shoot());
     $('cap-close').addEventListener('click', () => this.close());
     $('cap-finish').addEventListener('click', () => this._finish());
+
+    // drag-to-look (used when there are no motion sensors, e.g. desktop)
+    this._drag = null;
+    this.root.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('.cap-dot, button')) return;   // don't hijack dot/button clicks
+      this._drag = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener('pointermove', (e) => {
+      if (!this._drag || this.hasOrientation) return;
+      this.az = (this.az + (e.clientX - this._drag.x) * 0.25 + 360) % 360;
+      this.el = Math.max(-90, Math.min(90, this.el - (e.clientY - this._drag.y) * 0.25));
+      this._drag = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener('pointerup', () => { this._drag = null; });
   }
 
   _toast(msg, warn) {
