@@ -50,6 +50,12 @@ export default class Capture {
     this.root.classList.remove('hidden');
     document.body.classList.add('capturing');
 
+    // Start guidance immediately so the targeting dots are visible even while
+    // the camera permission prompt is still up.
+    this._renderTargets();
+    if (!this.raf) this._loop();
+    this._initOrientation();
+
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
@@ -58,13 +64,9 @@ export default class Capture {
       this.video.srcObject = this.stream;
       await this.video.play();
     } catch (e) {
-      this._fail('Camera access was blocked. Allow camera permission (and use HTTPS on a phone), then try again.');
-      return;
+      // Non-fatal: keep the overlay + dots, just tell the user what to do.
+      this._toast('Camera blocked. Allow camera permission (and use HTTPS on a phone), then reopen Capture.', true);
     }
-
-    await this._initOrientation();
-    this._renderTargets();
-    this._loop();
   }
 
   close() {
@@ -102,25 +104,64 @@ export default class Capture {
   _loop() {
     this.raf = requestAnimationFrame(() => this._loop());
     const remaining = TARGETS.filter(t => !this.captured[t.key]);
+    const done = Object.keys(this.captured).length;
+    $('cap-progress').textContent = `${done}/${TARGETS.length}`;
+    this.needle.style.transform = `rotate(${this.az}deg)`;
 
-    // nearest remaining target by angular distance
-    let nearest = null, nearestDist = Infinity;
-    remaining.forEach(t => {
-      const daz = angDiff(t.az, this.az);
-      const dele = t.el - this.el;
-      const dist = Math.hypot(daz, dele);
-      if (dist < nearestDist) { nearestDist = dist; nearest = t; }
-      const dot = this.dots[t.key];
-      // project onto screen
-      const x = 50 + (daz / FOV) * 50;
-      const y = 50 - (dele / FOV) * 50;
-      const onscreen = x > -5 && x < 105 && y > -5 && y < 105;
-      dot.style.display = onscreen ? 'flex' : 'none';
-      dot.style.left = x + '%';
-      dot.style.top = y + '%';
-    });
+    let nearest = null;
 
-    // states
+    if (this.hasOrientation) {
+      // ---- guided: project dots by phone orientation ----
+      let nearestDist = Infinity;
+      remaining.forEach(t => {
+        const daz = angDiff(t.az, this.az);
+        const dele = t.el - this.el;
+        const dist = Math.hypot(daz, dele);
+        if (dist < nearestDist) { nearestDist = dist; nearest = t; }
+      });
+      TARGETS.forEach(t => {
+        const dot = this.dots[t.key];
+        const daz = angDiff(t.az, this.az);
+        const dele = t.el - this.el;
+        const x = 50 + (daz / FOV) * 50;
+        const y = 50 - (dele / FOV) * 50;
+        const onscreen = x > -8 && x < 108 && y > -8 && y < 108;
+        dot.style.display = onscreen ? 'flex' : 'none';
+        dot.style.left = x + '%';
+        dot.style.top = y + '%';
+      });
+      const locked = nearest && nearestDist < LOCK_ANGLE;
+      this.crosshair.classList.toggle('locked', !!locked);
+      this._target = nearest;
+      $('cap-guidance').textContent = nearest
+        ? (locked ? `Hold steady — capturing ${nearest.label} ✓` : `Rotate to aim at: ${nearest.label}`)
+        : 'All directions captured — tap Finish';
+      $('cap-shoot').disabled = !locked;
+    } else {
+      // ---- manual / desktop: fixed clickable ring of dots ----
+      TARGETS.forEach(t => {
+        const dot = this.dots[t.key];
+        dot.style.display = 'flex';
+        let x, y;
+        if (t.el > 60) { x = 50; y = 9; }
+        else if (t.el < -60) { x = 50; y = 91; }
+        else {
+          const rad = t.az * Math.PI / 180;
+          x = 50 + 33 * Math.sin(rad);
+          y = 50 - 30 * Math.cos(rad);
+        }
+        dot.style.left = x + '%';
+        dot.style.top = y + '%';
+      });
+      nearest = remaining[0] || null;
+      this.crosshair.classList.remove('locked');
+      $('cap-guidance').textContent = remaining.length
+        ? `Aim your camera, then tap a dot to capture (${remaining.length} left)`
+        : 'All directions captured — tap Finish';
+      $('cap-shoot').disabled = true;
+    }
+
+    // dot states
     TARGETS.forEach(t => {
       const dot = this.dots[t.key];
       dot.classList.remove('current', 'done', 'pending');
@@ -128,18 +169,6 @@ export default class Capture {
       else if (t === nearest) dot.classList.add('current');
       else dot.classList.add('pending');
     });
-
-    const locked = nearest && this.hasOrientation && nearestDist < LOCK_ANGLE;
-    this.crosshair.classList.toggle('locked', !!locked);
-    this._target = nearest;
-    $('cap-guidance').textContent = nearest
-      ? (locked ? `Hold steady — capture ${nearest.label}` : `Rotate to aim at: ${nearest.label}`)
-      : 'All directions captured!';
-    $('cap-progress').textContent = `${Object.keys(this.captured).length}/${TARGETS.length}`;
-    $('cap-shoot').disabled = !nearest || (this.hasOrientation && !locked);
-
-    // compass needle
-    this.needle.style.transform = `rotate(${this.az}deg)`;
   }
 
   // ---------- capture ----------
@@ -232,6 +261,7 @@ export default class Capture {
       const d = document.createElement('div');
       d.className = 'cap-dot pending';
       d.innerHTML = `<span>${t.label}</span>`;
+      d.addEventListener('click', () => this.shoot(t.key));   // tap a dot to capture it
       this.dotsLayer.appendChild(d);
       this.dots[t.key] = d;
     });
