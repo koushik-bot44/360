@@ -117,14 +117,16 @@ h2, h3 { margin: 0; font-weight: 600; }
 /* ===== play / preview ===== */
 .play-chrome { display: none; }
 body.play-mode { overflow: hidden; }
-body.play-mode .topbar, body.play-mode .workspace { display: none; }
-body.play-mode .stage, body.play-mode .pano-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
-body.play-mode .stage { display: block; }
+body.play-mode .topbar { display: none; }
+/* IMPORTANT: do NOT display:none the .workspace — it contains the canvas, and a
+   display:none ancestor collapses the canvas to 0x0 (blank panorama). Hide the
+   sidebars instead and float the stage fullscreen. */
+body.play-mode .sidebar { display: none; }
+body.play-mode .workspace { grid-template-columns: 1fr; }
+body.play-mode .stage { position: fixed; inset: 0; z-index: 40; }
+body.play-mode .pano-canvas { width: 100%; height: 100%; }
 body.play-mode .stage-overlay, body.play-mode .place-hint, body.play-mode .empty-state { display: none !important; }
 body.play-mode .play-chrome { display: block; }
-
-/* keep the stage canvas mounted but full-screen in play mode */
-body.play-mode .stage { z-index: 40; }
 
 .play-topbar { position: fixed; top: 0; left: 0; right: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between;
   padding: 16px 20px; background: linear-gradient(180deg, rgba(0,0,0,.45), transparent); color: #fff; }

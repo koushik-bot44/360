@@ -293,7 +293,10 @@ export default class Builder {
     $('exit-play-btn').classList.toggle('hidden', !!fromShare);
     this._renderPlayInfo();
     this._renderPlayFloors();
+    // resize after the play-mode layout has actually applied (canvas goes fullscreen)
     this.viewer.resize();
+    requestAnimationFrame(() => this.viewer.resize());
+    setTimeout(() => this.viewer.resize(), 80);
   }
 
   _exitPlay() {
@@ -368,7 +371,10 @@ export default class Builder {
     fetch(url).then(r => r.json()).then((data) => {
       this.store = new TourStore(data);
       this._wireGlobal();
-      this._enterPlay(true);
+      this._enterPlay(false);          // show the Exit button
+      const exit = $('exit-play-btn');
+      exit.textContent = '← Home';
+      exit.onclick = () => { location.href = '/'; };   // leave the demo
     }).catch(() => {
       document.body.innerHTML = '<p style="padding:40px;font-family:sans-serif">Could not load that tour.</p>';
     });

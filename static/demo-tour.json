@@ -1,0 +1,30 @@
+{
+  "id": "demo-tour",
+  "title": "Demo Virtual Tour",
+  "details": {
+    "description": "A sample two-room 360° tour. Drag anywhere to look around in every direction, scroll to zoom, and click the white dot to walk into the next room.",
+    "amenities": "Drag to look, Scroll to zoom, Click dots to move"
+  },
+  "floors": ["Ground Floor"],
+  "startScene": "room1",
+  "scenes": [
+    {
+      "id": "room1",
+      "name": "Gallery",
+      "image": "/demo-room-1.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        { "id": "h1", "dir": { "x": 1, "y": -0.15, "z": 0.1 }, "target": "room2", "label": "Next room" }
+      ]
+    },
+    {
+      "id": "room2",
+      "name": "Atrium",
+      "image": "/demo-room-2.jpg",
+      "floor": "Ground Floor",
+      "hotspots": [
+        { "id": "h2", "dir": { "x": 1, "y": -0.15, "z": 0.1 }, "target": "room1", "label": "Back to gallery" }
+      ]
+    }
+  ]
+}
