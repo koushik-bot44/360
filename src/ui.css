@@ -119,6 +119,9 @@ canvas.webgl { position: fixed; inset: 0; width: 100%; height: 100%; display: bl
   transition: background .15s ease;
 }
 .welcome-btn:hover { background: #000; }
+.welcome-btn-link { display: block; text-align: center; text-decoration: none; box-sizing: border-box; }
+.welcome-btn-secondary { margin-top: 10px; background: #ffffff; color: var(--vt-ink); }
+.welcome-btn-secondary:hover { background: #fafafa; }
 .welcome-link { display: block; margin: 14px auto 0; background: none; border: none;
   color: var(--vt-muted); font-size: 13px; cursor: pointer; text-decoration: underline; }
 .welcome-link:hover { color: var(--vt-ink); }

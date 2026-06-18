@@ -24,10 +24,13 @@ envKeys['process.env.GOOGLE_MAPS_API_KEY'] =
   envKeys['process.env.GOOGLE_MAPS_API_KEY'] || JSON.stringify('');
 
 module.exports = {
-    entry: path.resolve(__dirname, '../src/index.js'),
+    entry: {
+        main: path.resolve(__dirname, '../src/index.js'),
+        builder: path.resolve(__dirname, '../src/builder.js'),
+    },
     output:
     {
-        filename: 'bundle.[contenthash].js',
+        filename: '[name].[contenthash].js',
         path: path.resolve(__dirname, '../../static/webpack_bundles')
     },
     devtool: 'source-map',
@@ -41,6 +44,13 @@ module.exports = {
         new HtmlWebpackPlugin({
             template: path.resolve(__dirname, '../src/index.html'),
             filename: 'index.html',
+            chunks: ['main'],
+            inject: 'body',
+        }),
+        new HtmlWebpackPlugin({
+            template: path.resolve(__dirname, '../src/builder.html'),
+            filename: 'builder.html',
+            chunks: ['builder'],
             inject: 'body',
         }),
         new MiniCSSExtractPlugin({

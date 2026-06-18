@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>360 Virtual Tour — Builder</title>
+  <meta name="description" content="Create an interactive multi-room 360° virtual tour from your own panoramic photos." />
+  <link rel="manifest" href="/site.webmanifest" />
+  <link rel="icon" href="/favicon.ico" />
+</head>
+<body>
+  <!-- ===================== TOP BAR ===================== -->
+  <header class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark">◎</span>
+      <span class="brand-name">360<span class="brand-thin">Tour Builder</span></span>
+    </a>
+    <div class="topbar-actions">
+      <button id="import-btn" class="btn ghost">Import</button>
+      <button id="export-btn" class="btn ghost">Export</button>
+      <button id="share-btn" class="btn ghost">Share link</button>
+      <button id="preview-btn" class="btn solid">▶ Preview</button>
+      <input id="import-input" type="file" accept=".json,application/json" class="sr-only" />
+    </div>
+  </header>
+
+  <div id="share-note" class="share-note hidden"></div>
+
+  <!-- ===================== WORKSPACE ===================== -->
+  <main class="workspace">
+
+    <!-- LEFT: scenes -->
+    <aside class="sidebar left">
+      <label class="field">
+        <span class="field-label">Tour title</span>
+        <input id="tour-title" class="input" placeholder="My Virtual Tour" />
+      </label>
+
+      <div class="sidebar-head">
+        <h3>Rooms / Scenes</h3>
+      </div>
+      <div class="add-row">
+        <button id="capture-room-btn" class="btn tiny solid">📷 Capture room</button>
+        <button id="add-photos-btn" class="btn tiny">+ Upload 360°</button>
+      </div>
+      <input id="upload-input" type="file" accept="image/*" multiple class="sr-only" />
+      <div id="scene-list" class="scene-list"></div>
+
+      <details class="details-panel">
+        <summary>Property details</summary>
+        <label class="field">
+          <span class="field-label">Description</span>
+          <textarea id="tour-desc" class="input" rows="3" placeholder="A bright 2-bedroom apartment…"></textarea>
+        </label>
+        <label class="field">
+          <span class="field-label">Amenities (comma-separated)</span>
+          <input id="tour-amenities" class="input" placeholder="Wi-Fi, Parking, Balcony" />
+        </label>
+      </details>
+    </aside>
+
+    <!-- CENTER: panorama stage -->
+    <section class="stage">
+      <canvas id="pano-canvas" class="pano-canvas"></canvas>
+
+      <div class="stage-overlay top">
+        <div class="scene-chip"><span id="current-scene-name">—</span></div>
+        <button id="add-hotspot-btn" class="btn small">＋ Add hotspot</button>
+      </div>
+      <div id="place-hint" class="place-hint hidden">Click anywhere on the photo to drop a hotspot</div>
+
+      <div id="empty-state" class="empty-state hidden">
+        <div class="empty-card">
+          <div class="empty-emoji">🖼️</div>
+          <h2>Start your virtual tour</h2>
+          <p>Capture a room with your phone camera, or upload 360° photos you already have. Each becomes a room you can connect with hotspots.</p>
+          <div class="empty-actions">
+            <button id="empty-capture-btn" class="btn solid">📷 Capture a room</button>
+            <button id="empty-upload-btn" class="btn">Upload 360° photos</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT: hotspots for current scene -->
+    <aside class="sidebar right">
+      <div class="sidebar-head"><h3>Hotspots</h3></div>
+      <p class="muted small">Hotspots are the white dots a visitor clicks to walk into another room.</p>
+      <div id="hotspot-list" class="hotspot-list"></div>
+    </aside>
+  </main>
+
+  <!-- ===================== CAMERA CAPTURE OVERLAY ===================== -->
+  <div id="capture-overlay" class="capture-overlay hidden">
+    <video id="cap-video" class="cap-video" playsinline muted autoplay></video>
+
+    <!-- guidance dots projected over the feed -->
+    <div id="cap-dots" class="cap-dots"></div>
+
+    <!-- center crosshair -->
+    <div id="cap-crosshair" class="cap-crosshair">
+      <div class="ch-ring"></div>
+      <div class="ch-plus"></div>
+    </div>
+
+    <!-- top bar -->
+    <div class="cap-top">
+      <div class="cap-titles">
+        <div class="cap-room">Capturing: <b id="cap-room-name">Room</b></div>
+        <div id="cap-guidance" class="cap-guidance">Point your camera and rotate</div>
+      </div>
+      <div class="cap-top-right">
+        <div class="cap-compass"><div id="cap-needle" class="cap-needle">▲</div></div>
+        <div id="cap-progress" class="cap-progress">0/10</div>
+        <button id="cap-close" class="hud-btn" title="Cancel">✕</button>
+      </div>
+    </div>
+
+    <!-- manual fallback grid (no motion sensors) -->
+    <div class="cap-manual">
+      <div class="cap-manual-label">Tap a direction, aim your camera there, it captures the current view:</div>
+      <div id="cap-manual-grid" class="cap-manual-grid"></div>
+    </div>
+
+    <!-- bottom controls -->
+    <div class="cap-bottom">
+      <button id="cap-finish" class="btn ghost light">Finish</button>
+      <button id="cap-shoot" class="cap-shoot" title="Capture"></button>
+      <span class="cap-spacer"></span>
+    </div>
+
+    <div id="cap-toast" class="cap-toast hidden"></div>
+  </div>
+
+  <!-- ===================== PLAY / PREVIEW OVERLAY ===================== -->
+  <div class="play-chrome">
+    <div class="play-topbar">
+      <div class="play-titles">
+        <div id="play-title" class="play-title">Virtual Tour</div>
+        <div id="play-scene-name" class="play-scene">—</div>
+      </div>
+      <div class="play-actions">
+        <button id="play-info-btn" class="hud-btn" title="Property details">i</button>
+        <button id="exit-play-btn" class="btn ghost light">✕ Exit preview</button>
+      </div>
+    </div>
+
+    <div id="play-info" class="play-info hidden">
+      <div class="play-info-card">
+        <button id="play-info-close" class="panel-close">×</button>
+        <h2 id="play-info-title">Virtual Tour</h2>
+        <p id="play-info-desc" class="muted"></p>
+        <div id="play-info-amenities" class="chips"></div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
