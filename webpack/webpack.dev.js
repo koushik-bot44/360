@@ -12,20 +12,21 @@ module.exports = merge(
     {
         output: {
             filename: 'bundle.[contenthash].js',
-            path: path.resolve(__dirname, '../static/webpack_bundles/'),
-            publicPath: "http://localhost:3000/static/webpack_bundles/",
+            path: path.resolve(__dirname, '../dist'),
+            publicPath: "/",
         },
         mode: 'development',
         devServer:
         {
             host: '0.0.0.0',
             allowedHosts: 'all',
-            port: 3000, 
+            port: 3000,
+            open: true,
+            // Serve the generated app (and copied static assets) from the
+            // root URL so the tour is available at http://localhost:3000/
             static: {
               directory: path.resolve(__dirname, "..", "static"),
-              staticOptions: {},
-              publicPath: "/static/",
-              serveIndex: true,
+              publicPath: "/",
               watch: true,
             },
         }

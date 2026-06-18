@@ -4,12 +4,12 @@ import * as THREE from 'three';
 
 import { GPUComputationRenderer } from 'three/addons/misc/GPUComputationRenderer.js';
 
-import Store from '../Store';
+import Store from '../../Store';
 
-import fragBirdPosition from "../shaders/fragBirdPosition.glsl";
-import fragBirdVelocity from "../shaders/fragBirdVelocity.glsl";
-import vertBirdVS from "../shaders/vertBirdVS.glsl";
-import fragBirdGeo from "../shaders/fragBirdGeo.glsl";
+import fragBirdPosition from "../../shaders/fragBirdPosition.glsl";
+import fragBirdVelocity from "../../shaders/fragBirdVelocity.glsl";
+import vertBirdVS from "../../shaders/vertBirdVS.glsl";
+import fragBirdGeo from "../../shaders/fragBirdGeo.glsl";
 
 
 

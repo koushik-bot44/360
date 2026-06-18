@@ -23,12 +23,19 @@ export default class Dollhouse {
     dracoLoader.setDecoderPath('https://static.mused.org/spaceshare/draco1.5.6/');
     loader.setDRACOLoader(dracoLoader);
     
-    try {
-      loader.load(space.mesh, gltf => this.onLoad(gltf), undefined, function (error) {
-        console.error('An error occurred while loading the model:', error);
-      });
-    } catch (e) {
-      console.error('Caught error:', e);
+    // A dollhouse mesh is optional. When a space ships without one, skip the
+    // GLTF load so the 360° viewer still boots (cursor raycast / orbit view
+    // simply fall back to node positions).
+    if (space.mesh) {
+      try {
+        loader.load(space.mesh, gltf => this.onLoad(gltf), undefined, function (error) {
+          console.error('An error occurred while loading the dollhouse model:', error);
+        });
+      } catch (e) {
+        console.error('Caught error loading dollhouse:', e);
+      }
+    } else {
+      console.warn('No dollhouse mesh provided for this space — running in 360-only mode.');
     }
 
     if (!isMobile) {

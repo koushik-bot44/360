@@ -10,7 +10,8 @@ module.exports = merge(
 	    output:
 	    {
     		filename: 'bundle.[contenthash].js',
-            path: path.resolve(__dirname, '../../static/webpack_bundles')
+            path: path.resolve(__dirname, '../dist'),
+            publicPath: './'
 	    },
         plugins:
         [

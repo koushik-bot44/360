@@ -1,15 +1,20 @@
 import './main.css'
+import './ui.css'
 import * as THREE from 'three'
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js'
 
 import Store from './Store';
 import EventManager from './EventManager';
 import App from './components/App'
+import Interface from './components/ui/Interface'
 
 
 
 // log version
 console.log("🌐🏛️ 360 Virtual Tour v1.0.0");
+
+// custom interface layer (welcome / help / info panels + shortcuts)
+const ui = new Interface();
 
 // Store
 // Create App

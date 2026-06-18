@@ -24,12 +24,31 @@ Built with **Three.js**, it renders equirectangular 360° imagery with a true 3D
 # 1. Install dependencies
 npm install
 
-# 2. Start the dev server
+# 2. Start the dev server  →  http://localhost:3000/
 npm run start
 
-# 3. Build for production
+# 3. Build for production   →  outputs to ./dist
 npm run build
 ```
+
+The dev server opens the tour at **http://localhost:3000/** with the bundled
+demo space. No backend required — everything runs as a static front-end.
+
+## What I built / changed
+This started from the open-source SPHR engine and was turned into a
+self-contained, runnable app:
+- **Standalone host page** (`src/index.html`) — the engine shipped without one
+  (it expected a Django backend to inject the DOM + data). I authored the full
+  page, scaffolding, and embedded a consistent demo space + tour.
+- **Custom interface layer** (`src/components/ui/Interface.js`, `src/ui.css`) —
+  branded welcome screen, help/controls panel, info card, themed HUD, and
+  keyboard shortcuts.
+- **Fixed the build** — implemented missing engine modules
+  (`spaceCustom`, `Photograph`, `Birds`) and corrected broken shader/import
+  paths so `npm run build` and `npm run start` work out of the box.
+- **Build tooling** — wired `HtmlWebpackPlugin`, made `dotenv` optional,
+  switched output to a standard `dist/` served from the root URL.
+- **Rebranding** — name, manifest, theme, and docs.
 
 Build for a specific language by setting the `LANG` env variable:
 ```bash
@@ -64,7 +83,6 @@ webpack/           Build configuration
 - Add new languages
 
 ## License
-MIT — see [LICENSE](LICENSE).
-
-## Credits
-This project builds on the open-source **SPHR** engine by Luke Hollis ([lukehollis/sphr](https://github.com/lukehollis/sphr)), extended and rebranded as **360 Virtual Tour**.
+MIT — see [LICENSE](LICENSE). Builds on the open-source SPHR engine
+([lukehollis/sphr](https://github.com/lukehollis/sphr)); the original copyright
+is retained in the license as MIT requires.

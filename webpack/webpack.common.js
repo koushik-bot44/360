@@ -8,14 +8,20 @@ const path = require('path')
 const webpack = require('webpack');
 const dotenv = require('dotenv');
 
-// Call dotenv and it will return an Object with a parsed key 
-const env = dotenv.config().parsed;
+// Call dotenv and it will return an Object with a parsed key.
+// Resilient: the app runs without a .env file (env vars are optional).
+const env = dotenv.config().parsed || {};
 
 // Reduce it to a nice object
 const envKeys = Object.keys(env).reduce((prev, next) => {
   prev[`process.env.${next}`] = JSON.stringify(env[next]);
   return prev;
 }, {});
+
+// Always define the keys the app reads, so `process.env.X` never throws
+// when no .env is present.
+envKeys['process.env.GOOGLE_MAPS_API_KEY'] =
+  envKeys['process.env.GOOGLE_MAPS_API_KEY'] || JSON.stringify('');
 
 module.exports = {
     entry: path.resolve(__dirname, '../src/index.js'),
@@ -32,6 +38,11 @@ module.exports = {
                 { from: path.resolve(__dirname, '../static') }
             ]
         }),
+        new HtmlWebpackPlugin({
+            template: path.resolve(__dirname, '../src/index.html'),
+            filename: 'index.html',
+            inject: 'body',
+        }),
         new MiniCSSExtractPlugin({
           filename: 'styles/[name].[contenthash].css',
           chunkFilename: 'styles/[id].[contenthash].css',
@@ -46,7 +57,15 @@ module.exports = {
             // HTML
             {
                 test: /\.(html)$/,
-                use: ['html-loader']
+                use: [
+                    {
+                        loader: 'html-loader',
+                        // Leave root-absolute asset URLs (/favicon.ico, /site.webmanifest,
+                        // etc.) untouched — they are served from the static directory at
+                        // runtime rather than bundled.
+                        options: { sources: false },
+                    },
+                ],
             },
 
             // JS

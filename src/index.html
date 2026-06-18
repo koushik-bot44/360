@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>360 Virtual Tour</title>
+  <meta name="description" content="An interactive 360° virtual tour and digital twin builder for the web — built with Three.js." />
+  <link rel="manifest" href="/site.webmanifest" />
+  <link rel="icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+</head>
+<body>
+
+  <!-- ===== 3D canvas ===== -->
+  <canvas class="webgl"></canvas>
+
+  <!-- ===== Loading screen ===== -->
+  <div id="loading-canvas"></div>
+  <div id="node-loading-screen"></div>
+  <div id="loading-screen">
+    <div class="loading-inner">
+      <div id="loading-title" class="loading-title">360 Virtual Tour</div>
+      <div id="loading-title2" class="loading-title2">Preparing your space</div>
+      <div id="loading-subtitle" class="loading-subtitle">Rendering 360° environment…</div>
+      <div id="loading-text-notification" class="loading-percent">
+        <span id="loading-text-notification-percent">0%</span>
+      </div>
+      <div id="loading-action-buttons"></div>
+    </div>
+  </div>
+
+  <!-- ===== HUD ===== -->
+  <div id="hud-container" class="hud">
+    <div id="title-outer" class="brand">
+      <span class="brand-mark">◎</span>
+      <span class="brand-name">360<span class="brand-thin">Virtual Tour</span></span>
+    </div>
+
+    <div class="hud-controls">
+      <button id="help-button" class="hud-btn" title="Controls &amp; help" aria-label="Help">?</button>
+      <button id="info-button" class="hud-btn" title="About this space" aria-label="Info">i</button>
+      <button id="view-mode-button" class="hud-btn" title="Toggle view mode" aria-label="Toggle view mode">
+        <span id="view-mode-fpv-icon">👁</span>
+        <span id="view-mode-orbit-icon" class="hidden">⤢</span>
+      </button>
+      <button id="full-screen-button" class="hud-btn" title="Fullscreen" aria-label="Fullscreen">
+        <span id="full-screen-on">⛶</span>
+        <span id="full-screen-off" class="hidden">⛶</span>
+      </button>
+    </div>
+    <div id="maps-attribution" class="maps-attribution hidden"></div>
+  </div>
+
+  <!-- ===== Tour UI ===== -->
+  <div id="tour-ui" class="tour-ui hidden">
+    <div id="tour-ui-display" class="tour-ui-display">
+      <div id="tour-ui-content" class="tour-ui-content">
+        <div id="tour-ui-navpoint" class="tour-ui-navpoint">
+          <div id="tour-point-text" class="tour-point-text">
+            <div id="tour-point-text-main" class="tour-point-text-main"></div>
+            <div id="tour-point-text-secondary" class="tour-point-text-secondary"></div>
+          </div>
+        </div>
+      </div>
+      <div id="tour-ui-buttons" class="tour-ui-buttons" style="opacity:0">
+        <button id="prev-button" class="tour-btn prev opacity-10">‹ Back</button>
+        <button id="next-button" class="tour-btn next">Next ›</button>
+      </div>
+    </div>
+    <!-- engine toggles (kept offscreen; driven programmatically) -->
+    <label class="sr-only"><input type="checkbox" id="autoplay" checked /> autoplay</label>
+    <label class="sr-only"><input type="checkbox" id="words" checked /> words</label>
+  </div>
+
+  <!-- hidden narrator video element used by AudioManager -->
+  <video id="narrator" class="sr-only" playsinline muted></video>
+
+  <!-- ===== ORIGINAL: Welcome overlay ===== -->
+  <div id="welcome-overlay" class="welcome">
+    <div class="welcome-card">
+      <div class="welcome-logo"><span class="brand-mark">◎</span></div>
+      <h1 class="welcome-title">360 Virtual Tour</h1>
+      <p class="welcome-sub">Step inside an immersive, photorealistic 360° walkthrough — navigate room to room, look in any direction, and explore in full 3D right from your browser.</p>
+      <ul class="welcome-feats">
+        <li><b>Drag</b> to look around</li>
+        <li><b>Click</b> a hotspot to move</li>
+        <li><b>Scroll</b> to zoom</li>
+      </ul>
+      <button id="welcome-start" class="welcome-btn">Start the Tour</button>
+      <button id="welcome-help" class="welcome-link">View controls</button>
+    </div>
+    <div class="welcome-footer">Built with Three.js · WebGL</div>
+  </div>
+
+  <!-- ===== ORIGINAL: Help / controls panel ===== -->
+  <div id="help-panel" class="panel hidden">
+    <div class="panel-card">
+      <div class="panel-head">
+        <h2>Controls</h2>
+        <button id="help-close" class="panel-close" aria-label="Close">×</button>
+      </div>
+      <div class="panel-body">
+        <div class="kbrow"><span class="key">Drag</span><span>Look around the space</span></div>
+        <div class="kbrow"><span class="key">Click</span><span>Travel to a hotspot</span></div>
+        <div class="kbrow"><span class="key">Scroll</span><span>Zoom in / out</span></div>
+        <div class="kbrow"><span class="key">V</span><span>Toggle first-person / orbit view</span></div>
+        <div class="kbrow"><span class="key">F</span><span>Toggle fullscreen</span></div>
+        <div class="kbrow"><span class="key">← →</span><span>Previous / next tour stop</span></div>
+        <div class="kbrow"><span class="key">Esc</span><span>Close this panel</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ORIGINAL: Info card ===== -->
+  <div id="info-card" class="panel hidden">
+    <div class="panel-card">
+      <div class="panel-head">
+        <h2>About this space</h2>
+        <button id="info-close" class="panel-close" aria-label="Close">×</button>
+      </div>
+      <div class="panel-body">
+        <p class="info-space-title">Heritage Space — 360° Capture</p>
+        <p class="info-space-desc">A photorealistic 360° capture rendered with Three.js. Each viewpoint is a high-resolution equirectangular panorama stitched into a navigable digital twin. Use the hotspots to move between captured positions.</p>
+        <div class="info-meta">
+          <div><span>Viewpoints</span><b>3</b></div>
+          <div><span>Resolution</span><b>4096px</b></div>
+          <div><span>Engine</span><b>Three.js</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Space + Tour data ===== -->
+  <script id="space_data" type="application/json">
+  {
+    "id": "demo-space",
+    "type": "spaces",
+    "mesh": "",
+    "space_data": {
+      "nodes": [
+        {
+          "uuid": "IMG_20231101_074927_00_479",
+          "image": "spaceshare/IMG_20231101_074927_00_479.jpg",
+          "index": 0,
+          "position": { "x": 64.41091673555964, "y": 11.991629130243957, "z": 3.7581584995137596 },
+          "rotation": { "x": -0.4679478281301798, "y": -1.5699190012618083, "z": -2.6941590536699116 },
+          "resolution": "4096",
+          "floorPosition": { "x": 64.41091673555965, "y": 6.678567170874559, "z": 3.7581584995137605 }
+        },
+        {
+          "uuid": "IMG_20231101_075039_00_482",
+          "image": "spaceshare/IMG_20231101_075039_00_482.jpg",
+          "index": 1,
+          "position": { "x": 69.19174379419019, "y": 12.03243293192055, "z": 5.273755180090258 },
+          "rotation": { "x": 3.1195583181976643, "y": 0.8614039302810801, "z": -0.034642048132864485 },
+          "resolution": "4096",
+          "floorPosition": { "x": 69.1917437941902, "y": 6.802931217938859, "z": 5.273755180090259 }
+        },
+        {
+          "uuid": "IMG_20231101_075124_00_485",
+          "image": "spaceshare/IMG_20231101_075124_00_485.jpg",
+          "index": 2,
+          "position": { "x": 74.38479544886985, "y": 12.111894705209153, "z": 8.749655928746867 },
+          "rotation": { "x": 3.1368996352960643, "y": -0.3479593085157371, "z": -0.02519085727941262 },
+          "resolution": "4096",
+          "floorPosition": { "x": 74.38479544886987, "y": 6.807316446936654, "z": 8.749655928746868 }
+        }
+      ],
+      "initialNode": "IMG_20231101_074927_00_479",
+      "sceneSettings": {
+        "nodes": { "scale": 0.26, "offsetPosition": { "x": 0, "y": 0, "z": 0 }, "offsetRotation": { "x": 0, "y": 0, "z": 0 } },
+        "dollhouse": { "scale": 1.1, "offsetPosition": { "x": 8.83, "y": 2.16, "z": 2.26 }, "offsetRotation": { "x": 0, "y": -0.22, "z": 0 } },
+        "offsetPosition": { "x": 0, "y": 0, "z": 0 },
+        "offsetRotation": { "x": 0, "y": 0, "z": 0 }
+      },
+      "initialRotation": { "polar": -19.4, "azimuth": 44.86 }
+    }
+  }
+  </script>
+
+  <script id="tour_data" type="application/json">
+  {
+    "tour_data": {
+      "audio": {
+        "default": { "url": "https://static.mused.org/sounds/default_oud_96k.mp3", "audio": null, "options": { "loop": true, "volume": 0.1, "autoplay": false } },
+        "navigate": { "url": "https://static.mused.org/sounds/bassdrum_64k.mp3", "audio": null, "options": { "loop": false, "volume": 0.1, "autoplay": false } }
+      },
+      "spaces": [
+        {
+          "id": "demo-space",
+          "url": "",
+          "type": "spaces",
+          "title": "360 Virtual Tour — Demo Space",
+          "tourpoints": [
+            {
+              "pan": "left",
+              "text": "Welcome to the 360 Virtual Tour demo. Drag to look around, then click a hotspot to move through the space.",
+              "zoom": 0, "files": [], "models": [], "sounds": ["default"],
+              "nodeUUID": "IMG_20231101_074927_00_479",
+              "rotation": { "polar": -2, "azimuth": 46 },
+              "viewMode": "FPV", "thumbnail": "", "targetType": "NODE",
+              "annotations": [], "textPosition": "center", "secondaryText": null
+            },
+            {
+              "pan": "left",
+              "text": "Each viewpoint is a full-resolution 360° panorama. Notice how the camera smoothly travels between captured positions.",
+              "zoom": 20, "files": [], "models": [], "sounds": ["default"],
+              "nodeUUID": "IMG_20231101_075039_00_482",
+              "rotation": { "polar": 2.4, "azimuth": 28 },
+              "viewMode": "FPV", "thumbnail": "", "targetType": "NODE",
+              "annotations": [], "textPosition": "left", "secondaryText": null
+            },
+            {
+              "pan": "left",
+              "text": "Use the orbit view to step back and see the whole space as a digital twin, then return to first-person to keep exploring.",
+              "zoom": 20, "files": [], "models": [], "sounds": ["default"],
+              "nodeUUID": "IMG_20231101_075124_00_485",
+              "rotation": { "polar": -4.2, "azimuth": -14 },
+              "viewMode": "FPV", "thumbnail": "", "targetType": "NODE",
+              "annotations": [], "textPosition": "left", "secondaryText": null
+            }
+          ]
+        }
+      ],
+      "autoplay": false,
+      "nextTour": "random",
+      "sceneGraph": [],
+      "annotationGraph": [],
+      "defaultShowText": true
+    }
+  }
+  </script>
+
+</body>
+</html>

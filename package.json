@@ -27,7 +27,6 @@
     "style-loader": "^2.0.0",
     "three": "^0.155.0",
     "three-custom-shader-material": "^5.4.0",
-    "three-good-godrays": "github:lukehollis/three-good-godrays",
     "webpack-merge": "^5.7.3"
   },
   "browserslist": {
@@ -49,6 +48,7 @@
     "@tailwindcss/typography": "^0.5.9",
     "@webpack-cli/serve": "^2.0.5",
     "autoprefixer": "^10.4.14",
+    "dotenv": "^16.6.1",
     "internal-ip": "^8.0.0",
     "lodash.template": "^4.5.0",
     "postcss": "^8.4.27",
