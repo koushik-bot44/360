@@ -1,32 +1,27 @@
 /**
- * Capture.js — camera-guided room capture.
+ * Capture.js — AR-guided 360° panorama capture.
  *
- * Opens the device camera, shows a center crosshair and guidance dots for the
- * directions that still need a photo. On a phone with motion sensors the dots
- * track your orientation and the crosshair "locks" onto the nearest target;
- * everywhere else (incl. desktop) a manual direction grid is used instead.
- *
- * Output: an object of face canvases { front, back, left, right, up, down }
- * (plus any captured diagonals) handed to onComplete().
+ * Opens the device camera and overlays a ring of reticle dots at the yaw angles
+ * still to be shot (12 targets, 30° apart = one horizontal ring ≈ 40%+ overlap).
+ * On a phone the dots track your orientation (DeviceOrientationEvent) and the
+ * crosshair "locks" when you're aimed at a target; on desktop you drag to look.
+ * Quality gates before/within capture:
+ *   • blur rejection (variance of Laplacian)
+ *   • walk detection (accelerometer) — warns if you translate instead of rotating
+ * When enough of the ring is captured it hands an ordered list of JPEG blobs
+ * (named by yaw, e.g. yaw_030.jpg) to onComplete for stitching → POST /panorama.
  */
 
-// label, azimuth (deg, 0=front, clockwise), elevation (deg)
-const TARGETS = [
-  { key: 'front',      label: 'Front',       az: 0,   el: 0,  face: true },
-  { key: 'frontRight', label: 'Front Right', az: 45,  el: 0 },
-  { key: 'right',      label: 'Right',       az: 90,  el: 0,  face: true },
-  { key: 'backRight',  label: 'Back Right',  az: 135, el: 0 },
-  { key: 'back',       label: 'Back',        az: 180, el: 0,  face: true },
-  { key: 'backLeft',   label: 'Back Left',   az: 225, el: 0 },
-  { key: 'left',       label: 'Left',        az: 270, el: 0,  face: true },
-  { key: 'frontLeft',  label: 'Front Left',  az: 315, el: 0 },
-  { key: 'up',         label: 'Up',          az: 0,   el: 85, face: true },
-  { key: 'down',       label: 'Down',        az: 0,   el: -85, face: true },
-];
+// 12 evenly-spaced yaw targets — one full horizontal ring.
+const TARGETS = Array.from({ length: 12 }, (_, i) => ({
+  key: `y${i * 30}`, label: `${i * 30}°`, az: i * 30, el: 0,
+}));
 
+const MIN_SHOTS = 8;       // allow finishing once most of the ring is covered
 const FOV = 65;            // assumed phone h-fov for projecting dots
 const LOCK_ANGLE = 11;     // deg crosshair must be within target to lock
 const BLUR_MIN = 55;       // laplacian-variance threshold
+const WALK_ACCEL = 2.2;    // m/s² (gravity-excluded) sustained ⇒ "you're walking"
 
 const $ = (id) => document.getElementById(id);
 function angDiff(a, b) { let d = ((a - b + 540) % 360) - 180; return d; }
@@ -34,11 +29,13 @@ function angDiff(a, b) { let d = ((a - b + 540) % 360) - 180; return d; }
 export default class Capture {
   constructor(onComplete) {
     this.onComplete = onComplete;
-    this.captured = {};        // key -> canvas
+    this.captured = {};        // key -> { canvas, yaw, pitch, t }
     this.az = 0; this.el = 0;
     this.hasOrientation = false;
     this.stream = null;
     this.raf = null;
+    this._accelEMA = 0;        // smoothed linear-acceleration magnitude
+    this._walking = false;
     this._mkDom();
   }
 
@@ -46,15 +43,15 @@ export default class Capture {
   async open(roomName) {
     this.captured = {};
     this.roomName = roomName || 'Room';
+    this._t0 = (typeof performance !== 'undefined' ? performance.now() : 0);
     $('cap-room-name').textContent = this.roomName;
     this.root.classList.remove('hidden');
     document.body.classList.add('capturing');
 
-    // Start guidance immediately so the targeting dots are visible even while
-    // the camera permission prompt is still up.
+    this._buildDots();
     this._renderTargets();
     if (!this.raf) this._loop();
-    this._initOrientation();
+    this._initMotion();
 
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
@@ -64,39 +61,45 @@ export default class Capture {
       this.video.srcObject = this.stream;
       await this.video.play();
     } catch (e) {
-      // Non-fatal: keep the overlay + dots, just tell the user what to do.
-      this._toast('Camera blocked. Allow camera permission (and use HTTPS on a phone), then reopen Capture.', true);
+      this._toast('Camera blocked. Allow camera permission (and use HTTPS on a phone), then reopen.', true);
     }
   }
 
   close() {
-    if (this.raf) cancelAnimationFrame(this.raf);
+    if (this.raf) { cancelAnimationFrame(this.raf); this.raf = null; }
     if (this.stream) this.stream.getTracks().forEach(t => t.stop());
     this.stream = null;
     window.removeEventListener('deviceorientation', this._onOrient);
+    window.removeEventListener('devicemotion', this._onMotion);
     this.root.classList.add('hidden');
     document.body.classList.remove('capturing');
   }
 
-  // ---------- orientation ----------
-  async _initOrientation() {
+  // ---------- orientation + motion ----------
+  async _initMotion() {
     this._onOrient = (e) => {
       if (e.alpha == null) return;
       this.hasOrientation = true;
-      // crude back-camera pointing approximation
-      this.az = (360 - e.alpha) % 360;
-      this.el = Math.max(-90, Math.min(90, (e.beta || 90) - 90));
+      this.az = (360 - e.alpha) % 360;                      // yaw
+      this.el = Math.max(-90, Math.min(90, (e.beta || 90) - 90));  // pitch
+    };
+    // accelerometer → detect physical translation (walking) vs pure rotation
+    this._onMotion = (e) => {
+      const a = e.acceleration || {};                       // gravity excluded
+      if (a.x == null) return;
+      const mag = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
+      this._accelEMA = this._accelEMA * 0.8 + mag * 0.2;
+      this._walking = this._accelEMA > WALK_ACCEL;
     };
     try {
-      const DOE = window.DeviceOrientationEvent;
+      const DOE = window.DeviceOrientationEvent, DME = window.DeviceMotionEvent;
       if (DOE && typeof DOE.requestPermission === 'function') {
-        const res = await DOE.requestPermission();   // iOS — needs the tap that opened capture
-        if (res === 'granted') window.addEventListener('deviceorientation', this._onOrient);
-      } else if (DOE) {
-        window.addEventListener('deviceorientation', this._onOrient);
-      }
+        if (await DOE.requestPermission() === 'granted') window.addEventListener('deviceorientation', this._onOrient);
+      } else if (DOE) { window.addEventListener('deviceorientation', this._onOrient); }
+      if (DME && typeof DME.requestPermission === 'function') {
+        if (await DME.requestPermission() === 'granted') window.addEventListener('devicemotion', this._onMotion);
+      } else if (DME) { window.addEventListener('devicemotion', this._onMotion); }
     } catch (e) { /* manual mode */ }
-    // give sensors a beat to report
     setTimeout(() => { this.manual = !this.hasOrientation; this.root.classList.toggle('manual-mode', this.manual); }, 700);
   }
 
@@ -104,14 +107,10 @@ export default class Capture {
   _loop() {
     this.raf = requestAnimationFrame(() => this._loop());
     const remaining = TARGETS.filter(t => !this.captured[t.key]);
-    const done = Object.keys(this.captured).length;
+    const done = TARGETS.length - remaining.length;
     $('cap-progress').textContent = `${done}/${TARGETS.length}`;
     this.needle.style.transform = `rotate(${this.az}deg)`;
 
-    // Dots live in the world around you. Project each onto the screen by how
-    // far it is from where you're currently facing — so only the dot(s) in
-    // front are visible; you turn (gyro on a phone, drag on desktop) to bring
-    // the target into the crosshair.
     let nearest = null, nearestDist = Infinity;
     remaining.forEach(t => {
       const dist = Math.hypot(angDiff(t.az, this.az), t.el - this.el);
@@ -120,58 +119,62 @@ export default class Capture {
 
     TARGETS.forEach(t => {
       const dot = this.dots[t.key];
+      if (!dot) return;
       const daz = angDiff(t.az, this.az);
-      const dele = t.el - this.el;
       const x = 50 + (daz / FOV) * 50;
-      const y = 50 - (dele / FOV) * 50;
-      const onscreen = x > -6 && x < 106 && y > -6 && y < 106;
-      dot.style.display = onscreen ? 'flex' : 'none';
-      dot.style.left = x + '%';
-      dot.style.top = y + '%';
+      const y = 50 - ((t.el - this.el) / FOV) * 50;
+      dot.style.display = (x > -6 && x < 106 && y > -6 && y < 106) ? 'flex' : 'none';
+      dot.style.left = x + '%'; dot.style.top = y + '%';
       dot.classList.remove('current', 'done', 'pending');
-      if (this.captured[t.key]) dot.classList.add('done');
-      else if (t === nearest) dot.classList.add('current');
-      else dot.classList.add('pending');
+      dot.classList.add(this.captured[t.key] ? 'done' : (t === nearest ? 'current' : 'pending'));
     });
 
-    const locked = nearest && nearestDist < LOCK_ANGLE;
+    const locked = nearest && nearestDist < LOCK_ANGLE && !this._walking;
     this.crosshair.classList.toggle('locked', !!locked);
+    this.crosshair.classList.toggle('warn', !!this._walking);
     this._target = nearest;
+
     const how = this.hasOrientation ? 'Turn' : 'Drag';
-    $('cap-guidance').textContent = nearest
-      ? (locked ? `Aligned — press the shutter to capture ${nearest.label} ✓`
-                : `${how} to bring “${nearest.label}” into the crosshair`)
-      : 'All directions captured — press Finish';
+    let msg;
+    if (this._walking) msg = '⚠ Stay in one spot — rotate in place, don\'t walk';
+    else if (!nearest) msg = 'Ring complete — press Finish to stitch';
+    else if (locked) msg = `Aligned (${nearest.label}) — tap the shutter ✓`;
+    else msg = `${how} to bring the ${nearest.label} dot into the crosshair`;
+    $('cap-guidance').textContent = msg;
+
     $('cap-shoot').disabled = !locked;
+    $('cap-finish').disabled = done < MIN_SHOTS;
+    $('cap-finish').textContent = done < MIN_SHOTS ? `Finish (need ${MIN_SHOTS - done})` : `Finish & stitch (${done})`;
   }
 
   // ---------- capture ----------
   _grabFrame() {
     const vw = this.video.videoWidth, vh = this.video.videoHeight;
     if (!vw) return null;
-    const s = Math.min(vw, vh);
+    const scale = Math.min(1, 1280 / Math.max(vw, vh));     // keep full FOV, cap size
     const c = document.createElement('canvas');
-    c.width = c.height = 1024;
-    const ctx = c.getContext('2d');
-    ctx.drawImage(this.video, (vw - s) / 2, (vh - s) / 2, s, s, 0, 0, 1024, 1024);
+    c.width = Math.round(vw * scale); c.height = Math.round(vh * scale);
+    c.getContext('2d').drawImage(this.video, 0, 0, c.width, c.height);
     return c;
   }
 
   shoot(forKey) {
     const target = forKey ? TARGETS.find(t => t.key === forKey) : this._target;
     if (!target) return;
+    if (this._walking) { this._toast('You moved — stand still and rotate in place, then capture.', true); return; }
     const frame = this._grabFrame();
     if (!frame) return;
-
     const sharp = this._sharpness(frame);
     if (sharp < BLUR_MIN) {
-      this._toast(`Looks blurry (score ${Math.round(sharp)}). Hold still and retake ${target.label}.`, true);
+      this._toast(`Looks blurry (score ${Math.round(sharp)}). Hold still and retake.`, true);
       return;
     }
-    this.captured[target.key] = frame;
+    this.captured[target.key] = {
+      canvas: frame, yaw: Math.round(this.az), pitch: Math.round(this.el),
+      t: Math.round((typeof performance !== 'undefined' ? performance.now() : 0) - this._t0),
+    };
     this._toast(`✓ ${target.label} captured (sharpness ${Math.round(sharp)})`);
     this._renderTargets();
-
     if (Object.keys(this.captured).length === TARGETS.length) this._finish();
   }
 
@@ -186,8 +189,8 @@ export default class Capture {
     let mean = 0; const lap = new Float32Array(n * n);
     for (let y = 1; y < n - 1; y++) for (let x = 1; x < n - 1; x++) {
       const i = y * n + x;
-      const v = -4 * g[i] + g[i-1] + g[i+1] + g[i-n] + g[i+n];
-      lap[i] = v; mean += v;
+      lap[i] = -4 * g[i] + g[i-1] + g[i+1] + g[i-n] + g[i+n];
+      mean += lap[i];
     }
     mean /= (n * n);
     let varr = 0;
@@ -196,19 +199,22 @@ export default class Capture {
   }
 
   _finish() {
-    const coverage = TARGETS.filter(t => t.face).every(t => this.captured[t.key]);
-    if (!coverage) { this._toast('Some core directions are missing — capture them to finish.', true); return; }
-    const faces = {};
-    ['front','back','left','right','up','down'].forEach(k => { faces[k] = this.captured[k]; });
-    const quality = this._roomQuality();
+    const shots = TARGETS.filter(t => this.captured[t.key]).map(t => this.captured[t.key]);
+    if (shots.length < MIN_SHOTS) {
+      this._toast(`Capture at least ${MIN_SHOTS} shots around you first.`, true);
+      return;
+    }
+    const roomName = this.roomName;
+    // metadata sidecar (yaw/pitch/timestamp per shot) — kept for ordering / future use
+    const meta = shots.map(s => ({ yaw: s.yaw, pitch: s.pitch, t: s.t }));
     this.close();
-    this.onComplete && this.onComplete({ faces, roomName: this.roomName, quality });
-  }
-
-  _roomQuality() {
-    // simple 0-100 score from how many captured + average not-blurry margin
-    const done = Object.keys(this.captured).length;
-    return Math.round((done / TARGETS.length) * 100);
+    Promise.all(shots.map(s => new Promise(res =>
+      s.canvas.toBlob(b => res(b ? { blob: b, yaw: s.yaw } : null), 'image/jpeg', 0.9))))
+      .then(items => {
+        const frames = items.filter(Boolean).map(it =>
+          new File([it.blob], `yaw_${String(it.yaw).padStart(3, '0')}.jpg`, { type: 'image/jpeg' }));
+        this.onComplete && this.onComplete({ panoMode: true, frames, meta, roomName });
+      });
   }
 
   // ---------- dom ----------
@@ -224,6 +230,19 @@ export default class Capture {
     });
   }
 
+  _buildDots() {
+    this.dotsLayer.innerHTML = '';
+    this.dots = {};
+    TARGETS.forEach(t => {
+      const d = document.createElement('div');
+      d.className = 'cap-dot pending';
+      d.innerHTML = `<span>${t.label}</span>`;
+      d.addEventListener('click', () => this.shoot(t.key));
+      this.dotsLayer.appendChild(d);
+      this.dots[t.key] = d;
+    });
+  }
+
   _mkDom() {
     this.root = $('capture-overlay');
     this.video = $('cap-video');
@@ -231,14 +250,6 @@ export default class Capture {
     this.needle = $('cap-needle');
     this.dotsLayer = $('cap-dots');
     this.dots = {};
-    TARGETS.forEach(t => {
-      const d = document.createElement('div');
-      d.className = 'cap-dot pending';
-      d.innerHTML = `<span>${t.label}</span>`;
-      d.addEventListener('click', () => this.shoot(t.key));   // tap a dot to capture it
-      this.dotsLayer.appendChild(d);
-      this.dots[t.key] = d;
-    });
     $('cap-shoot').addEventListener('click', () => this.shoot());
     $('cap-close').addEventListener('click', () => this.close());
     $('cap-finish').addEventListener('click', () => this._finish());
@@ -246,7 +257,7 @@ export default class Capture {
     // drag-to-look (used when there are no motion sensors, e.g. desktop)
     this._drag = null;
     this.root.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('.cap-dot, button')) return;   // don't hijack dot/button clicks
+      if (e.target.closest('.cap-dot, button')) return;
       this._drag = { x: e.clientX, y: e.clientY };
     });
     window.addEventListener('pointermove', (e) => {
@@ -266,6 +277,4 @@ export default class Capture {
     clearTimeout(this._tt);
     this._tt = setTimeout(() => el.classList.add('hidden'), 2600);
   }
-
-  _fail(msg) { this._toast(msg, true); setTimeout(() => this.close(), 3200); }
 }

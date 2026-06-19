@@ -195,6 +195,7 @@ body.play-mode .play-chrome { display: block; }
 .ch-plus::before { left: 50%; top: 0; width: 2px; height: 100%; transform: translateX(-50%); }
 .ch-plus::after { top: 50%; left: 0; height: 2px; width: 100%; transform: translateY(-50%); }
 .cap-crosshair.locked .ch-ring { border-color: #34c759; transform: scale(1.12); }
+.cap-crosshair.warn .ch-ring { border-color: #ff4d4d; transform: scale(1.05); }
 
 .cap-top { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: flex-start;
   padding: 16px; background: linear-gradient(180deg, rgba(0,0,0,.55), transparent); color: #fff; }

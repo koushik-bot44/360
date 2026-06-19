@@ -7,7 +7,6 @@
 import PanoViewer from './PanoViewer';
 import TourStore from './TourStore';
 import Capture from './Capture';
-import cubeToEquirect from './cubeToEquirect';
 
 const $ = (id) => document.getElementById(id);
 
@@ -66,8 +65,8 @@ export default class Builder {
     $('stitch-photos-btn').addEventListener('click', () => $('stitch-input').click());
     $('empty-stitch-btn').addEventListener('click', () => $('stitch-input').click());
 
-    $('capture-room-btn').addEventListener('click', () => this._startCapture());
-    $('empty-capture-btn').addEventListener('click', () => this._startCapture());
+    $('guided-capture-btn').addEventListener('click', () => this._startCapture());
+    $('empty-guided-btn').addEventListener('click', () => this._startCapture());
 
     $('add-floor-btn').addEventListener('click', () => {
       const name = prompt('Floor name? (e.g. First Floor, Basement)');
@@ -115,23 +114,24 @@ export default class Builder {
   }
 
   // ---------- panorama stitching (backend) ----------
-  async _onStitchPhotos(files) {
-    const list = Array.from(files || []);
-    if (!list.length) return;
+  // Shared by the file-picker ("Stitch photos") and the guided capture flow.
+  // photos = array of File/Blob (overlapping shots). On success the resulting
+  // panorama is added as a room scene and shown immediately.
+  async _stitchPanorama(photos, roomName) {
+    const list = Array.from(photos || []);
     const note = $('stitch-note');
     const show = (msg) => { note.textContent = msg; note.classList.remove('hidden'); };
-    if (list.length < 6) {
-      show(`Only ${list.length} photos — stitching usually needs 10–20 overlapping shots. Trying anyway…`);
-    } else {
-      show(`Stitching ${list.length} photos into a panorama… (this runs on your local backend)`);
-    }
+    if (!list.length) return;
+    show(list.length < 6
+      ? `Only ${list.length} photos — stitching usually needs 10–20 overlapping shots. Trying anyway…`
+      : `Stitching ${list.length} photos into a panorama…`);
 
     const form = new FormData();
-    list.forEach((f) => form.append('files', f, f.name));
+    list.forEach((f, i) => form.append('files', f, f.name || `shot_${i}.jpg`));
 
-    let res, data;
+    let data;
     try {
-      res = await fetch(`${PANO_BACKEND}/panorama`, { method: 'POST', body: form });
+      const res = await fetch(`${PANO_BACKEND}/panorama`, { method: 'POST', body: form });
       data = await res.json();
     } catch (e) {
       show(`Could not reach the stitching backend at ${PANO_BACKEND}. Start it with: cd backend && uvicorn app.main:app --port 8000`);
@@ -143,42 +143,32 @@ export default class Builder {
       return;
     }
 
-    // success → add the panorama as a room scene and show it immediately
-    const name = `Room ${this.store.tour.scenes.length + 1}`;
+    const name = roomName || `Room ${this.store.tour.scenes.length + 1}`;
     const scene = this.store.addScene(name, data.image, this.activeFloor);
     await this._persist();
     this.refresh();
-    this.selectScene(scene.id);
+    this.selectScene(scene.id);          // opens it in the sphere viewer
     this._emptyHint(false);
     const [w, h] = data.output_resolution || [];
-    show(`✓ Panorama added — ${data.num_images_used} photos, ${data.num_matches} matched features, ${w}×${h}px (vertical FOV ~${data.vertical_fov_deg}°). Drag to look around.`);
+    show(`✓ “${name}” added — ${data.num_images_used} photos, ${data.num_matches} matched features, ${w}×${h}px (vertical FOV ~${data.vertical_fov_deg}°). Drag to look around.`);
     setTimeout(() => note.classList.add('hidden'), 9000);
   }
 
-  // ---------- camera capture ----------
+  _onStitchPhotos(files) {
+    this._stitchPanorama(files, null);
+  }
+
+  // ---------- AR-guided capture ----------
   _startCapture() {
     const name = prompt('Room name?', `Room ${this.store.tour.scenes.length + 1}`);
     if (name === null) return;
     this.capture.open(name || `Room ${this.store.tour.scenes.length + 1}`);
   }
 
+  // called by Capture when the ring is done → stitch the captured frames
   _onCaptured(result) {
-    if (!result || !result.faces) return;
-    const note = $('share-note');
-    note.textContent = 'Assembling your 360° room…';
-    note.classList.remove('hidden');
-    cubeToEquirect(result.faces).then((dataUrl) => {
-      const scene = this.store.addScene(result.roomName, dataUrl, this.activeFloor);
-      this._persist();
-      this.refresh();
-      this.selectScene(scene.id);
-      this._emptyHint(false);
-      note.textContent = `“${result.roomName}” added (coverage ${result.quality}%). Tip: drag to look — seams are expected from a phone capture.`;
-      setTimeout(() => note.classList.add('hidden'), 5000);
-    }).catch(() => {
-      note.textContent = 'Could not assemble the room. Please try capturing again.';
-      setTimeout(() => note.classList.add('hidden'), 4000);
-    });
+    if (!result || !result.panoMode || !result.frames || !result.frames.length) return;
+    this._stitchPanorama(result.frames, result.roomName);
   }
 
   _onImport(file) {

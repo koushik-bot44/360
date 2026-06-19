@@ -3,11 +3,11 @@
 _The goal: stand inside a room and look freely around — like Zillow 3D Home / Kuula —_
 _not a slideshow of flat photos. This document is the pipeline for getting there._
 
-The good news: **the viewer half already exists.** `src/builder/PanoViewer.js` renders an
-equirectangular image on the inside of a sphere with drag-to-look — that *is* the "stand and
-look around" experience. `Capture.js` already does orientation-guided capture with blur
-rejection. The missing piece is a **real panorama stitch** (today `cubeToEquirect.js` is an
-approximate, seamy cube assembly) plus **automatic scene linking**.
+The good news: **capture, stitch, and viewer are built and verified.** `Capture.js` runs the
+AR-guided ring capture, `POST /panorama` (OpenCV Stitcher) produces the equirectangular, and
+`PanoViewer.js` renders it on a sphere with drag-to-look — the full "stand and look around"
+experience. The remaining piece is **automatic scene linking** (hotspots between rooms) and a
+**full-sphere** capture to remove the floor/ceiling caps.
 
 ---
 
@@ -114,20 +114,19 @@ COLMAP positioning option).
 
 Reuse-heavy — most pieces exist:
 
-| Step | Work | Reuse / new |
+| Step | Work | Status |
 |---|---|---|
-| 1. Guided capture | Capture a **denser overlapping ring** (raw frames + yaw/pitch), not one-per-cube-face | **Reuse** `Capture.js` (orientation + blur), tweak target set |
-| 2. Stitch | `POST /panorama` (N images + orientation hints) → OpenCV PANORAMA stitch → equirectangular JPEG → store, return URL | **New** backend endpoint; reuse opencv already installed |
-| 3. Scene | Equirectangular becomes `scene.image` | **Reuse** `PanoViewer` sphere + `TourStore` as-is |
-| 4. Auto-link | Create hotspots from capture order; bearing via pano-to-pano feature match | **New** small module; reuse hotspot schema |
-| 5. Fallbacks | Manual hotspot editor; 360-camera equirectangular upload | **Reuse** existing builder + upload |
+| 1. **Guided capture** | AR reticle ring (12 @ 30°), crosshair lock, blur reject, walk detection, yaw/pitch/timestamp metadata, auto-stitch on finish (`Capture.js`) | ✅ **Done** |
+| 2. **Stitch** | `POST /panorama` → OpenCV PANORAMA stitch → 2:1 equirectangular + debug (`stitch.py`) | ✅ **Done** |
+| 3. **Scene** | Equirectangular becomes `scene.image` in the sphere viewer | ✅ **Done** (reused `PanoViewer` + `TourStore`) |
+| 4. Auto-link | Create hotspots from capture order; bearing via pano-to-pano feature match | ⏳ Next |
+| 5. Fallbacks | Manual hotspot editor; 360-camera equirectangular upload; 🧩 stitch-from-files | ✅ Done |
 
-Retire `cubeToEquirect.js` (the approximate assembler) once the real stitch lands. The flat
-**node-graph / photo-billboard renderer is a debug view only — not part of this UX.**
+`cubeToEquirect.js` (the old approximate assembler) has been **removed** — the real stitch
+replaces it. The flat node-graph / photo-billboard renderer was also dropped (not this UX).
 
-Milestone order: (1) backend stitch endpoint producing a clean horizontal-band equirect from
-~12 phone photos → render in the sphere viewer; (2) denser guided capture; (3) auto-link;
-(4) full-sphere via Hugin; (5) optional COLMAP minimap.
+Milestone order: (1) ✅ backend stitch endpoint; (2) ✅ guided capture; (3) auto-link rooms;
+(4) full-sphere via Hugin (kill the floor/ceiling caps); (5) optional COLMAP minimap.
 
 ---
 

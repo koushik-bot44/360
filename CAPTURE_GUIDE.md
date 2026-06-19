@@ -4,6 +4,13 @@ How to shoot the **10–20 overlapping photos** the stitcher turns into one
 equirectangular panorama (one room = one panorama). Follow this and the stitch
 "just works"; ignore it and it fails or ghosts.
 
+> **Easiest: use the in-app guided capture.** In the builder tap **🧭 Guided 360°**.
+> It shows a ring of reticle dots at 30° intervals, locks the crosshair when you're
+> aimed at one, rejects blurry shots, warns if you physically walk, and tracks
+> progress (0/12 → 12/12). When the ring is done it auto-stitches and opens the
+> room in the viewer. The rest of this guide explains the *why* (and how to shoot
+> manually for the 🧩 Stitch-photos path or a 360° camera).
+
 ---
 
 ## The one rule: **rotate in place, don't walk**
