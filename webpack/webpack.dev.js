@@ -21,6 +21,10 @@ module.exports = merge(
             host: '0.0.0.0',
             allowedHosts: 'all',
             port: 3000,
+            // HTTPS (self-signed) so phones allow the camera + motion sensors —
+            // they're blocked on plain http except on localhost. webpack-dev-server
+            // auto-generates the certificate; accept the warning on the phone.
+            server: 'https',
             open: true,
             // Never let the dev overlay cover the app; show build errors in the
             // terminal instead, and never for warnings.

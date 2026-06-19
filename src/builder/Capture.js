@@ -5,8 +5,11 @@
  * still to be shot. The pattern is three rings + the two poles for full 360×180
  * coverage (no dark floor/ceiling): a middle ring (12 @ 0°), an upper ring
  * (8 @ +55°), a lower ring (8 @ −55°), and zenith/nadir — 30 targets.
- * On a phone the dots track your orientation (DeviceOrientationEvent) and the
- * crosshair "locks" when you're aimed at a target; on desktop you drag to look.
+ * To stay clean (like a guided street-view capture) only the NEXT target dot is
+ * shown at a time; aim it into the crosshair and — once aligned and steady for a
+ * moment — it AUTO-captures (no tapping). Orientation is low-pass smoothed so the
+ * dot doesn't jitter. On a phone the dot tracks your motion (DeviceOrientationEvent);
+ * on desktop you drag to look.
  * Quality gates: blur rejection (variance of Laplacian) and walk detection
  * (accelerometer warns if you translate instead of rotating). When enough is
  * captured it hands an ordered list of JPEG blobs (named by yaw/pitch) to
@@ -24,9 +27,11 @@ const TARGETS = [
 
 const MIN_SHOTS = 12;      // at least the middle ring (poles/rings fill in for full sphere)
 const FOV = 65;            // assumed phone h-fov for projecting dots
-const LOCK_ANGLE = 11;     // deg crosshair must be within target to lock
+const LOCK_ANGLE = 12;     // deg crosshair must be within target to lock
 const BLUR_MIN = 55;       // laplacian-variance threshold
 const WALK_ACCEL = 2.2;    // m/s² (gravity-excluded) sustained ⇒ "you're walking"
+const SMOOTH = 0.2;        // orientation low-pass factor (anti-jitter)
+const AUTO_MS = 650;       // hold aligned this long → auto-capture (hands-free)
 
 const $ = (id) => document.getElementById(id);
 function angDiff(a, b) { let d = ((a - b + 540) % 360) - 180; return d; }
@@ -84,9 +89,15 @@ export default class Capture {
   async _initMotion() {
     this._onOrient = (e) => {
       if (e.alpha == null) return;
+      const tAz = (360 - e.alpha) % 360;                         // target yaw
+      const tEl = Math.max(-90, Math.min(90, (e.beta || 90) - 90)); // target pitch
+      if (!this.hasOrientation) { this.az = tAz; this.el = tEl; } // snap on first reading
+      else {                                                      // low-pass smoothing → no jitter
+        let d = ((tAz - this.az + 540) % 360) - 180;
+        this.az = (this.az + d * SMOOTH + 360) % 360;
+        this.el += (tEl - this.el) * SMOOTH;
+      }
       this.hasOrientation = true;
-      this.az = (360 - e.alpha) % 360;                      // yaw
-      this.el = Math.max(-90, Math.min(90, (e.beta || 90) - 90));  // pitch
     };
     // accelerometer → detect physical translation (walking) vs pure rotation
     this._onMotion = (e) => {
@@ -111,40 +122,61 @@ export default class Capture {
   // ---------- render loop ----------
   _loop() {
     this.raf = requestAnimationFrame(() => this._loop());
+    const now = performance.now();
     const remaining = TARGETS.filter(t => !this.captured[t.key]);
     const done = TARGETS.length - remaining.length;
     $('cap-progress').textContent = `${done}/${TARGETS.length}`;
     this.needle.style.transform = `rotate(${this.az}deg)`;
 
+    // the single next target (nearest uncaptured) — we show ONLY this one to
+    // keep the screen clean, like a guided street-view capture.
     let nearest = null, nearestDist = Infinity;
     remaining.forEach(t => {
       const dist = Math.hypot(angDiff(t.az, this.az), t.el - this.el);
       if (dist < nearestDist) { nearestDist = dist; nearest = t; }
     });
+    this._target = nearest;
 
+    const clamp = (v) => Math.max(6, Math.min(94, v));
     TARGETS.forEach(t => {
       const dot = this.dots[t.key];
       if (!dot) return;
-      const daz = angDiff(t.az, this.az);
-      const x = 50 + (daz / FOV) * 50;
+      if (t !== nearest) { dot.style.display = 'none'; return; }   // one dot at a time
+      const x = 50 + (angDiff(t.az, this.az) / FOV) * 50;
       const y = 50 - ((t.el - this.el) / FOV) * 50;
-      dot.style.display = (x > -6 && x < 106 && y > -6 && y < 106) ? 'flex' : 'none';
-      dot.style.left = x + '%'; dot.style.top = y + '%';
-      dot.classList.remove('current', 'done', 'pending');
-      dot.classList.add(this.captured[t.key] ? 'done' : (t === nearest ? 'current' : 'pending'));
+      const onscreen = x > 0 && x < 100 && y > 0 && y < 100;
+      dot.style.display = 'flex';
+      dot.style.left = clamp(x) + '%'; dot.style.top = clamp(y) + '%';
+      dot.classList.remove('done', 'pending');
+      dot.classList.toggle('current', true);
+      dot.classList.toggle('edge', !onscreen);                     // riding the edge = "turn this way"
     });
 
     const locked = nearest && nearestDist < LOCK_ANGLE && !this._walking;
     this.crosshair.classList.toggle('locked', !!locked);
     this.crosshair.classList.toggle('warn', !!this._walking);
-    this._target = nearest;
+
+    // hands-free auto-capture: hold aligned & steady for AUTO_MS → snap
+    if (locked) {
+      if (!this._lockStart) this._lockStart = now;
+      this.crosshair.classList.add('arming');
+      if (now - this._lockStart > AUTO_MS && !this._autoBusy) {
+        this._autoBusy = true;
+        this.shoot();                 // captures _target (blur-checked inside)
+        this._autoBusy = false;
+        this._lockStart = 0;
+      }
+    } else {
+      this._lockStart = 0;
+      this.crosshair.classList.remove('arming');
+    }
 
     const how = this.hasOrientation ? 'Turn' : 'Drag';
     let msg;
     if (this._walking) msg = '⚠ Stay in one spot — rotate in place, don\'t walk';
-    else if (!nearest) msg = 'Ring complete — press Finish to stitch';
-    else if (locked) msg = `Aligned (${nearest.label}) — tap the shutter ✓`;
-    else msg = `${how} to bring the ${nearest.label} dot into the crosshair`;
+    else if (!nearest) msg = 'All captured — press Finish to stitch';
+    else if (locked) msg = 'Hold steady — capturing…';
+    else msg = `${how} to bring the dot into the crosshair`;
     $('cap-guidance').textContent = msg;
 
     $('cap-shoot').disabled = !locked;

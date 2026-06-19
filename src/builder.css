@@ -196,6 +196,11 @@ body.play-mode .play-chrome { display: block; }
 .ch-plus::after { top: 50%; left: 0; height: 2px; width: 100%; transform: translateY(-50%); }
 .cap-crosshair.locked .ch-ring { border-color: #34c759; transform: scale(1.12); }
 .cap-crosshair.warn .ch-ring { border-color: #ff4d4d; transform: scale(1.05); }
+/* hands-free auto-capture: green halo grows while aligned, then it snaps */
+@keyframes cap-arm { from { box-shadow: 0 0 0 0 rgba(52,199,89,0); } to { box-shadow: 0 0 0 12px rgba(52,199,89,.4); } }
+.cap-crosshair.arming .ch-ring { animation: cap-arm .65s ease-out forwards; }
+/* current target riding the screen edge = "turn this way" */
+.cap-dot.edge::before { opacity: .55; border-style: dashed; }
 
 /* floor-plan minimap (bottom-right of the stage; visible in build + play) */
 .minimap-wrap { position: absolute; right: 14px; bottom: 14px; width: 168px;
