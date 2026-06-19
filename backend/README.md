@@ -110,7 +110,7 @@ the auto-created hotspots.
 ## Scripts
 | Script | What it does |
 |---|---|
-| `scripts/make_synthetic_pano.py [dir] [n] [pitch]` | render a **rotation** capture (photos from one point) — input for stitching |
+| `scripts/make_synthetic_pano.py [dir] [n\|sphere]` | render a **rotation** capture — single ring (`n`) or full sphere (`sphere`: 12 mid + 8 up + 8 down + 2 poles) |
 | `scripts/stitch_test.py [n]` | render a rotation capture, stitch it → `samples/sample_panorama.jpg` |
 | `scripts/make_pano_at.py [out] [x y z]` | render a full equirectangular panorama from a position in the room |
 | `scripts/link_test.py` | render two panoramas at known positions, check recovered bearings vs ground truth |

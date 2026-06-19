@@ -30,11 +30,17 @@ different amounts (**parallax**) and the stitch ghosts or fails.
 2. **Hold the phone portrait** (vertical) — more vertical coverage per shot.
 3. **Lock exposure & focus** (tap-and-hold on most phones) before you start, so
    brightness stays consistent for clean blending.
-4. **One horizontal ring:** take a photo, rotate ~**30°**, repeat — all the way
-   around (**~12 photos** for a full 360°). Keep the horizon roughly level.
-5. *(Optional, fuller sphere)* add a ring tilted **~45° up** and one **~45° down**,
-   plus a straight-up and straight-down shot (~30 photos total).
-6. Walk to the next room and repeat — each becomes another scene you link with hotspots.
+4. **Middle ring:** take a photo, rotate ~**30°**, repeat all the way around
+   (**12 photos**). Keep the horizon roughly level.
+5. **Upper ring:** tilt up ~**55°** and shoot **8** around (rotate ~45° each).
+6. **Lower ring:** tilt down ~**55°** and shoot **8** around.
+7. **Zenith + nadir:** one straight up, one straight down — fills the very
+   top/bottom so there's **no dark ceiling or floor**.
+8. Walk to the next room and repeat — each becomes another scene you link with hotspots.
+
+That's **~30 photos** for a full sphere. The in-app **🧭 Guided 360°** runs exactly
+this pattern for you — the reticle dots appear above and below the horizon and at
+the poles, so you just follow them.
 
 ### Numbers that matter
 | Setting | Target | Why |
@@ -93,9 +99,12 @@ failure). Always rotate in place:
 ---
 
 ## Known limitations (POC)
-- Output is a **horizontal band** with neutral floor/ceiling caps unless you also
-  shoot up/down rings. Full seamless poles need a multi-ring capture (or Hugin).
-- A full-circle horizontal sweep is assumed for correct 360° wrap; a partial sweep
-  shows neutral fill where you didn't capture.
+- Shooting only the middle ring gives a **horizontal band** with neutral
+  floor/ceiling caps; add the upper/lower rings + poles (the guided pattern) for a
+  **full sphere** with covered floor and ceiling.
+- A full-circle sweep is assumed for correct 360° wrap; a partial sweep shows
+  neutral fill where you didn't capture.
+- The poles can look slightly soft (OpenCV converges texture there). For
+  production-grade poles, Hugin is the upgrade.
 - A **360° camera** (Ricoh Theta, Insta360) skips all of this — just upload its
   equirectangular image via **Upload 360°**.

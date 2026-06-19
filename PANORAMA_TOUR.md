@@ -5,9 +5,11 @@ _not a slideshow of flat photos. This document is the pipeline for getting there
 
 The good news: **capture, stitch, viewer, and auto-linking are built and verified.**
 `Capture.js` runs the AR-guided ring capture, `POST /panorama` (OpenCV Stitcher) produces the
-equirectangular, `PanoViewer.js` renders it on a sphere with drag-to-look, and `POST /link`
-auto-detects which rooms connect and places hotspots that point the right way. The remaining
-piece is a **full-sphere** capture to remove the floor/ceiling caps.
+equirectangular, `PanoViewer.js` renders it on a sphere with drag-to-look, `POST /link`
+auto-detects which rooms connect and places hotspots that point the right way, and the guided
+capture now shoots a **full sphere** (middle + upper/lower rings + poles) so there are no
+dark floor/ceiling caps. What's left is polish (production-grade poles via Hugin, room
+positioning minimap).
 
 ---
 
@@ -126,7 +128,8 @@ Reuse-heavy — most pieces exist:
 replaces it. The flat node-graph / photo-billboard renderer was also dropped (not this UX).
 
 Milestone order: (1) ✅ backend stitch endpoint; (2) ✅ guided capture; (3) ✅ auto-link rooms;
-(4) full-sphere via Hugin (kill the floor/ceiling caps); (5) optional COLMAP minimap.
+(4) ✅ full-sphere multi-ring capture (caps gone); (5) polish: production-grade poles via
+Hugin, optional COLMAP minimap.
 
 ---
 

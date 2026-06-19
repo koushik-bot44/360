@@ -1,23 +1,28 @@
 /**
- * Capture.js — AR-guided 360° panorama capture.
+ * Capture.js — AR-guided FULL-SPHERE panorama capture.
  *
- * Opens the device camera and overlays a ring of reticle dots at the yaw angles
- * still to be shot (12 targets, 30° apart = one horizontal ring ≈ 40%+ overlap).
+ * Opens the device camera and overlays reticle dots at the yaw/pitch positions
+ * still to be shot. The pattern is three rings + the two poles for full 360×180
+ * coverage (no dark floor/ceiling): a middle ring (12 @ 0°), an upper ring
+ * (8 @ +55°), a lower ring (8 @ −55°), and zenith/nadir — 30 targets.
  * On a phone the dots track your orientation (DeviceOrientationEvent) and the
  * crosshair "locks" when you're aimed at a target; on desktop you drag to look.
- * Quality gates before/within capture:
- *   • blur rejection (variance of Laplacian)
- *   • walk detection (accelerometer) — warns if you translate instead of rotating
- * When enough of the ring is captured it hands an ordered list of JPEG blobs
- * (named by yaw, e.g. yaw_030.jpg) to onComplete for stitching → POST /panorama.
+ * Quality gates: blur rejection (variance of Laplacian) and walk detection
+ * (accelerometer warns if you translate instead of rotating). When enough is
+ * captured it hands an ordered list of JPEG blobs (named by yaw/pitch) to
+ * onComplete for stitching → POST /panorama → full-sphere equirectangular.
  */
 
-// 12 evenly-spaced yaw targets — one full horizontal ring.
-const TARGETS = Array.from({ length: 12 }, (_, i) => ({
-  key: `y${i * 30}`, label: `${i * 30}°`, az: i * 30, el: 0,
-}));
+// Full-sphere target set: middle ring + upper/lower rings + poles.
+const TARGETS = [
+  ...Array.from({ length: 12 }, (_, i) => ({ key: `m${i}`, label: `${i * 30}°`, az: i * 30, el: 0 })),
+  ...Array.from({ length: 8 }, (_, i) => ({ key: `u${i}`, label: '↑', az: i * 45 + 22.5, el: 55 })),
+  ...Array.from({ length: 8 }, (_, i) => ({ key: `d${i}`, label: '↓', az: i * 45 + 22.5, el: -55 })),
+  { key: 'zen', label: 'Up', az: 0, el: 85 },
+  { key: 'nad', label: 'Down', az: 0, el: -85 },
+];
 
-const MIN_SHOTS = 8;       // allow finishing once most of the ring is covered
+const MIN_SHOTS = 12;      // at least the middle ring (poles/rings fill in for full sphere)
 const FOV = 65;            // assumed phone h-fov for projecting dots
 const LOCK_ANGLE = 11;     // deg crosshair must be within target to lock
 const BLUR_MIN = 55;       // laplacian-variance threshold
@@ -208,11 +213,12 @@ export default class Capture {
     // metadata sidecar (yaw/pitch/timestamp per shot) — kept for ordering / future use
     const meta = shots.map(s => ({ yaw: s.yaw, pitch: s.pitch, t: s.t }));
     this.close();
+    const tag = (v) => (v < 0 ? 'm' : 'p') + String(Math.abs(v)).padStart(3, '0');
     Promise.all(shots.map(s => new Promise(res =>
-      s.canvas.toBlob(b => res(b ? { blob: b, yaw: s.yaw } : null), 'image/jpeg', 0.9))))
+      s.canvas.toBlob(b => res(b ? { blob: b, yaw: s.yaw, pitch: s.pitch } : null), 'image/jpeg', 0.9))))
       .then(items => {
         const frames = items.filter(Boolean).map(it =>
-          new File([it.blob], `yaw_${String(it.yaw).padStart(3, '0')}.jpg`, { type: 'image/jpeg' }));
+          new File([it.blob], `y${tag(it.yaw)}_p${tag(it.pitch)}.jpg`, { type: 'image/jpeg' }));
         this.onComplete && this.onComplete({ panoMode: true, frames, meta, roomName });
       });
   }

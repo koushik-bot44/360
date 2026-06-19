@@ -2,8 +2,10 @@
 
 Uses OpenCV's high-level Stitcher in PANORAMA mode (spherical warp). The stitched
 result is a spherical strip (linear in azimuth/elevation); we place it into a 2:1
-equirectangular canvas — vertically centered, with neutral caps for the
-un-captured floor/ceiling — so the existing sphere viewer can load it directly.
+equirectangular canvas so the sphere viewer can load it directly. A single
+horizontal ring fills the middle band (neutral caps top/bottom); a full-sphere
+multi-ring capture (middle + upper/lower rings + poles) fills the whole canvas —
+the same code path handles both (caps shrink to nothing as vertical coverage grows).
 
 Returns the panorama plus debugging info: images used, matched features, output
 resolution, and a clear success/failure reason.
