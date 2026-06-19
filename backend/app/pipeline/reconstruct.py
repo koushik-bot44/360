@@ -24,7 +24,7 @@ def run_job(job_id: str, job_dir: Path, image_base_url: str):
             raise RuntimeError("no images uploaded")
 
         if colmap_runner.is_available():
-            engine = "colmap"
+            engine = colmap_runner.engine_name()
             db.update_job(job_id, status="reconstructing", engine=engine)
             model_dir = colmap_runner.run(images_dir, job_dir / "colmap")
             nodes = poses_mod.parse_images_txt(model_dir)

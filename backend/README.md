@@ -16,11 +16,23 @@ tour.json  →  loadable by the existing viewer at  /builder.html?tour=<url>
 This is a **local POC**. No accounts, billing, auth, or cloud — just the smallest
 end-to-end system that proves the pipeline. The front-end is unchanged.
 
-## Runs without COLMAP
-If the `colmap` binary isn't on PATH, the pipeline uses a **mock-pose** path
-(arranges the photos as a ring of outward-facing viewpoints) so the whole flow —
-upload → graph → tour.json → viewer — is demonstrable immediately. Install COLMAP
-to get **real** geometry; everything downstream is identical.
+## Real reconstruction is verified ✅
+The default engine is **pycolmap** (COLMAP as a pip wheel — no system install).
+On a synthetic room with known ground-truth poses, it recovered **20/20 camera
+positions with RMSE 0.5% of the ring radius** (`python scripts/colmap_test.py`).
+If neither pycolmap nor a `colmap` CLI binary is present, the pipeline falls back
+to a **mock-pose** path so the whole flow — upload → graph → tour.json → viewer —
+is still demonstrable; everything downstream is identical.
+
+## Capture geometry matters more than the engine
+The two things that make or break reconstruction (learned the hard way during
+verification):
+- **Parallax** — the camera must *translate* between shots. Tiny rings / near-pure
+  rotation are panoramic-degenerate and collapse all cameras to one point.
+- **Shared structure** — neighbouring photos must see the *same* surfaces. Cameras
+  looking **across** a room (object-centric) reconstruct cleanly; cameras looking
+  **outward** at disjoint walls do not. This directly informs Phase 3 AR-capture
+  guidance.
 
 ## Setup
 ```bash
@@ -73,12 +85,20 @@ http://localhost:3000/builder.html?tour=http://localhost:8000/tours/<JID>/tour.j
 The viewer fetches the auto-generated `tour.json` and lets you walk the nodes via
 the auto-created hotspots.
 
+## Scripts
+| Script | What it does |
+|---|---|
+| `scripts/make_synthetic_room.py [dir] [n]` | render a textured room from a ring of cameras (+ ground-truth poses) |
+| `scripts/colmap_test.py` | run the real engine and check recovered poses vs. ground truth (RMSE) |
+| `scripts/real_tour_demo.py` | full pipeline on real reconstruction → `samples/sample_tour_colmap.json` |
+| `scripts/smoke_test.py` | fast end-to-end check (mock path, no COLMAP needed) |
+
 ## Honest limitations (POC)
 - **Mock path is not reconstruction** — it fakes a ring layout so the integration
-  is visible. Real geometry requires COLMAP.
-- **Perspective photos in an equirectangular viewer look distorted.** The proof
-  here is the *automatic pose→graph→hotspot* pipeline; a dedicated node-graph
-  renderer (photos as billboards at their 3D positions) is the natural next step.
+  is visible when no real engine is installed.
+- **Perspective-photo distortion is fixed in the viewer**: auto-generated tours
+  (`_meta.generated`) now render each photo on a flat billboard (the node-graph
+  renderer) instead of wrapping it on a sphere. See `src/builder/PanoViewer.js`.
 - Indoor low-texture rooms can defeat classic COLMAP matching; `hloc`
   (SuperPoint+SuperGlue) is the documented upgrade (see ../ARCHITECTURE.md §7).
 - Single-process background tasks (no queue) — fine for one user, one job.

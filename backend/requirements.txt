@@ -7,9 +7,11 @@ numpy>=1.26
 pillow>=10.2
 httpx>=0.27          # used by fastapi TestClient (smoke_test.py)
 
-# Optional (real reconstruction). The pipeline falls back to a mock-pose path
-# when these / the COLMAP binary are not present, so the POC runs without them.
-#   pip install pycolmap opencv-python-headless
-# COLMAP binary must be installed separately:  https://colmap.github.io/install.html
-#   macOS:  brew install colmap
-#   ubuntu: apt install colmap
+# Real reconstruction (recommended). pycolmap ships COLMAP's engine as a pip
+# wheel — no system install / sudo / brew needed. Verified on arm64 macOS:
+# 20/20 synthetic-room poses recovered, RMSE 0.5% of ring radius
+# (scripts/colmap_test.py). opencv is used by the synthetic-scene generator.
+# If neither pycolmap nor a `colmap` CLI binary is present, the pipeline falls
+# back to a mock-pose path so the POC still runs end-to-end.
+pycolmap>=3.13            # COLMAP SfM engine (no separate binary needed)
+opencv-python-headless    # scripts/make_synthetic_room.py (test-scene renderer)

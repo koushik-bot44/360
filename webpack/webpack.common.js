@@ -25,7 +25,6 @@ envKeys['process.env.GOOGLE_MAPS_API_KEY'] =
 
 module.exports = {
     entry: {
-        main: path.resolve(__dirname, '../src/index.js'),
         builder: path.resolve(__dirname, '../src/builder.js'),
     },
     output:
@@ -34,12 +33,6 @@ module.exports = {
         path: path.resolve(__dirname, '../../static/webpack_bundles')
     },
     devtool: 'source-map',
-    // The Matterport SDK emits a harmless "Critical dependency" warning; ignore
-    // it so it doesn't trip the dev-server error overlay (which would block the UI).
-    ignoreWarnings: [
-        { module: /@matterport[\\/]sdk/ },
-        /Critical dependency: the request of a dependency is an expression/,
-    ],
     plugins:
     [
         new CopyWebpackPlugin({
@@ -47,11 +40,13 @@ module.exports = {
                 { from: path.resolve(__dirname, '../static') }
             ]
         }),
+        // index.html is a self-contained static landing (no JS bundle) that
+        // links to the builder — the actual product.
         new HtmlWebpackPlugin({
             template: path.resolve(__dirname, '../src/index.html'),
             filename: 'index.html',
-            chunks: ['main'],
-            inject: 'body',
+            chunks: [],
+            inject: false,
         }),
         new HtmlWebpackPlugin({
             template: path.resolve(__dirname, '../src/builder.html'),

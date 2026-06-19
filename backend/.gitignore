@@ -2,5 +2,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-data/jobs/
+# generated: job outputs + synthetic test renders (reproducible via scripts/)
+data/
 *.db

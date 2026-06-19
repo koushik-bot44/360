@@ -12,9 +12,9 @@ alongside [`ARCHITECTURE.md`](./ARCHITECTURE.md) (the design for the full system
 
 A working **360° tour builder** (Phase 1, production-quality for a student project) plus a
 **local proof-of-concept reconstruction backend** (Phase 2) that turns ordinary phone photos
-into an auto-generated tour graph the existing viewer can load. The Phase 2 *pipeline and
-viewer integration are proven*; **real COLMAP geometry has not yet been verified on this
-machine** (the binary isn't installed, so the demonstrated run used the mock-pose path).
+into an auto-generated tour graph the existing viewer can load. **Real reconstruction is now
+verified** (pycolmap: 20/20 synthetic poses, RMSE 0.5%), and the perspective-photo distortion
+is fixed by a new flat **node-graph renderer** in the viewer.
 
 ---
 
@@ -32,23 +32,25 @@ machine** (the binary isn't installed, so the demonstrated run used the mock-pos
 | **IndexedDB** storage (auto-migrates old localStorage tours, surfaces quota errors) | ✅ Working |
 | Bundled real 360° demo tour | ✅ Working |
 
-### Phase 2 — Reconstruction backend (POC) ⚠️ PIPELINE PROVEN, REAL GEOMETRY UNVERIFIED
+### Phase 2 — Reconstruction backend (POC) ✅ REAL RECONSTRUCTION VERIFIED
 | Component | File | Status |
 |---|---|---|
 | FastAPI app (create job → upload photos → reconstruct → poll → tour.json) | `backend/app/main.py` | ✅ Working |
 | SQLite job store | `backend/app/db.py` | ✅ Working |
-| COLMAP subprocess runner (feature → sequential match → mapper → TXT export) | `backend/app/pipeline/colmap_runner.py` | ✅ Code complete, ⚠️ binary not installed locally |
-| Pose parser (`images.txt` → position + forward) | `backend/app/pipeline/poses.py` | ✅ Code complete, ⚠️ unverified on real COLMAP output |
-| Mock-pose fallback (ring of viewpoints) | `backend/app/pipeline/mock.py` | ✅ Working — this is what was demonstrated |
+| **Reconstruction runner — pycolmap engine** (features → exhaustive match → incremental SfM → TXT export), colmap-CLI fallback | `backend/app/pipeline/colmap_runner.py` | ✅ **Verified** (20/20 poses) |
+| Pose parser (`images.txt` → position + forward) | `backend/app/pipeline/poses.py` | ✅ Verified on real output |
+| Mock-pose fallback (ring of viewpoints) | `backend/app/pipeline/mock.py` | ✅ Working (used only if no engine) |
 | **Auto graph builder** (k-NN links + hotspot direction by projecting neighbour's 3D position into the camera frame) | `backend/app/pipeline/graph.py` | ✅ Working |
 | Exporter → viewer-compatible `tour.json` | `backend/app/pipeline/export.py` | ✅ Working |
-| Smoke test (12 synthetic photos → tour.json, no server/COLMAP) | `backend/scripts/smoke_test.py` | ✅ Working |
-| Sample output | `backend/samples/sample_tour.json` (8.7 KB) | ✅ Present |
+| Synthetic test-scene renderer (+ ground truth) | `backend/scripts/make_synthetic_room.py` | ✅ Working |
+| **Reconstruction accuracy test** (RMSE vs ground truth) | `backend/scripts/colmap_test.py` | ✅ PASS (RMSE 0.5%) |
+| Full real-pipeline demo → sample | `backend/scripts/real_tour_demo.py` → `samples/sample_tour_colmap.json` | ✅ Working |
+| **Node-graph renderer** (flat undistorted photo billboards + directional dots) | `src/builder/PanoViewer.js`, `src/builder/Builder.js` | ✅ **Verified in-browser** |
 | **Viewer integration** (`builder.html?tour=<url>` fetches & renders the generated tour) | `src/builder/Builder.js`, `src/index.html` | ✅ Proven |
 
-**Proven flow (with mock poses):**
+**Proven flow (real pycolmap reconstruction, screenshotted in-browser):**
 ```
-phone photos → backend → poses → auto graph → tour.json → Three.js viewer → rendered
+phone photos → pycolmap poses → auto graph → tour.json → flat node-graph viewer → rendered
 ```
 
 ---
@@ -57,23 +59,36 @@ phone photos → backend → poses → auto graph → tour.json → Three.js vie
 
 | Question | Answer |
 |---|---|
-| **Does COLMAP successfully extract camera poses?** | **Not yet verified.** The runner + parser are written and correct on paper, but `colmap` is not installed on this machine, so every demonstrated run used the **mock** path. This is the #1 thing to validate next. |
+| **Does COLMAP successfully extract camera poses?** | ✅ **Yes — verified.** pycolmap recovered **20/20** camera poses on a synthetic room with known ground truth; RMSE **0.012 units (0.5% of ring radius)** after similarity alignment (`scripts/colmap_test.py`). |
 | **Are viewpoints generated automatically?** | ✅ **Yes.** One navigation node per camera pose, no manual step. |
 | **Are hotspots generated automatically?** | ✅ **Yes.** Each node links to its nearest neighbours; each hotspot direction is computed by projecting the neighbour's real 3D position into the node's camera frame — the dot literally points at the next viewpoint. |
 | **Is room detection implemented?** | ❌ **No.** All nodes are treated as one space ("Ground Floor"). |
 | **Is room-to-room linking implemented?** | ⚠️ **Partial.** Nodes are linked by 3D proximity (k-NN within `MAX_LINK_DIST`), but there is no concept of distinct *rooms* or doorways yet. |
-| **Can a user create a tour from only phone photos?** | ⚠️ **Yes via the API end-to-end**, but (a) real geometry needs COLMAP installed, and (b) perspective photos shown on an equirectangular sphere look distorted — see limitations. |
-| **What still prevents a Matterport-like experience?** | A dedicated **node-graph renderer** (photos as billboards at their 3D positions, not wrapped on a sphere), **verified real reconstruction**, **dense/mesh geometry**, **room segmentation**, a **dollhouse/floorplan view**, and **measurement**. |
+| **Can a user create a tour from only phone photos?** | ✅ **Yes, end-to-end** — verified live: upload 20 photos → pycolmap → auto graph → tour.json → rendered in the browser. Caveat: quality depends on **capture geometry** (parallax + shared structure — see below). |
+| **What still prevents a Matterport-like experience?** | **Dense/mesh geometry** (we have sparse points + poses), **room segmentation**, a **dollhouse/floorplan view**, **measurement**, and **AR-guided capture** to guarantee good input. The node-graph renderer and verified reconstruction are now done. |
+
+### Capture geometry — the key product insight (learned during verification)
+Reconstruction quality is dominated by **how the photos are taken**, not the engine. Two
+failed attempts before the passing one showed:
+- **Parallax is required** — the camera must *translate* between shots. A tiny camera ring
+  (near-pure rotation, like spinning in place) is panoramic-degenerate and collapses every
+  camera to one point (RMSE ≈ 100%).
+- **Neighbours must share structure** — cameras looking **across** the room (object-centric)
+  reconstruct cleanly (RMSE 0.5%); cameras looking **outward** at disjoint walls fail.
+
+This is exactly what **Phase 3 AR-guided capture** must enforce: walk around, keep the same
+surfaces in view, ensure overlap.
 
 ---
 
 ## 4. Current limitations (honest)
 
 1. **Mock path ≠ reconstruction.** The ring layout fakes geometry to make the integration
-   visible. Real positions require COLMAP (or `hloc`) — install it to validate.
-2. **Perspective photos in an equirectangular viewer look distorted** (the "PHOTO 1"
-   stretching seen in testing). The POC proves the *pose → graph → hotspot* automation, not
-   final visual fidelity. A node-graph renderer is the right fix.
+   visible. Real positions require COLMAP (or `hloc`) — now verified via pycolmap.
+2. **The flat node-graph renderer is a debug/inspection view, NOT the final UX.** The target
+   experience is a **true 360° panorama tour** (stand in a room, look freely around) — see
+   [`PANORAMA_TOUR.md`](./PANORAMA_TOUR.md). COLMAP's role is repositioned to the optional
+   **scene-positioning / floor-map** layer, not the imagery.
 3. **Indoor low-texture rooms can defeat classic COLMAP** feature matching. `hloc`
    (SuperPoint + SuperGlue) is the documented upgrade — see `ARCHITECTURE.md §7`.
 4. **Single-process background tasks**, no real job queue. Fine for one user / one job; not
@@ -87,20 +102,22 @@ phone photos → backend → poses → auto graph → tour.json → Three.js vie
 | Track | Completeness |
 |---|---|
 | MVP 360° Tour Builder | **100%** |
-| COLMAP reconstruction (code) | **70%** — written, not yet run on real photos |
-| Automatic tour generation (poses → graph → hotspots) | **60%** — works on mock; awaits real-geometry validation |
-| Matterport-like experience | **~10%** |
+| COLMAP reconstruction | **100%** — pycolmap verified, 20/20 poses, RMSE 0.5% |
+| Automatic tour generation (poses → graph → hotspots) | **90%** — end-to-end on real geometry; needs robustness on real phone photos |
+| Node-graph viewer (undistorted) | **100%** — flat billboards + directional dots, verified in-browser |
+| Matterport-like experience | **~25%** |
 
 ---
 
-## 6. Immediate next steps (to close Phase 2 honestly)
+## 6. Immediate next steps (now that Phase 2 is verified)
 
-1. **Install COLMAP** (`brew install colmap`) and run the API on a real 20–30 photo set of
-   one room. Confirm `poses.py` parses `images.txt` and the graph looks sane.
-2. **Add a node-graph renderer** to the viewer: show each photo as a billboard at its 3D
-   position instead of wrapping it on a sphere. This removes the distortion and is the single
-   biggest visual-quality win.
-3. **Capture two screenshots** (mock tour + first real COLMAP tour) and drop them here.
+1. ✅ ~~Install COLMAP & verify real poses~~ — done via **pycolmap** (RMSE 0.5%).
+2. ✅ ~~Add a node-graph renderer~~ — done (flat billboards, verified in-browser).
+3. **Test on real phone photos** of an actual room (the synthetic scene is ideal; real photos
+   add blur, low texture, exposure changes). This is the next robustness milestone.
+4. **Show node positions in the UI** — a small top-down minimap from the recovered 3D
+   positions would make navigation between viewpoints obvious (dots can sit off-screen when
+   neighbours are to the side).
 
 ---
 

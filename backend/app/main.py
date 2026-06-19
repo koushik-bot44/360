@@ -49,7 +49,7 @@ def _status(job, request: Request) -> JobStatus:
 @app.get("/health")
 def health():
     return {"ok": True, "colmap": colmap_runner.is_available(),
-            "engine": "colmap" if colmap_runner.is_available() else "mock"}
+            "engine": colmap_runner.engine_name()}
 
 
 @app.post("/tours", response_model=JobStatus)
