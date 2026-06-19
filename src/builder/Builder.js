@@ -113,21 +113,45 @@ export default class Builder {
   }
 
   // ---------- upload ----------
+  // Upload 360° expects a full equirectangular image (~2:1). We measure each
+  // file's aspect ratio and warn when it looks like an ordinary flat photo —
+  // those wrap/stretch on the sphere; the user should stitch instead.
   _onUpload(files) {
     const list = Array.from(files || []);
     if (!list.length) return;
     let pending = list.length;
+    let lastScene = null;
+    const notPano = [];   // names that aren't ~2:1
+
+    const done = () => {
+      if (--pending > 0) return;
+      this._persist();
+      this.refresh();
+      if (lastScene) this.selectScene(lastScene.id);
+      this._emptyHint(false);
+      if (notPano.length) {
+        const note = $('stitch-note');
+        const which = notPano.length === 1 ? `“${notPano[0]}” doesn’t` : `${notPano.length} images don’t`;
+        note.textContent = `⚠ ${which} look like a 360° panorama (not ~2:1) — they’ll appear stretched on the sphere. Use 🧩 Stitch photos for ordinary photos, or upload a 2:1 equirectangular image.`;
+        note.classList.remove('hidden');
+        setTimeout(() => note.classList.add('hidden'), 11000);
+      }
+    };
+
     list.forEach((file) => {
       const reader = new FileReader();
       reader.onload = () => {
-        const scene = this.store.addScene(file.name.replace(/\.[^.]+$/, ''), reader.result, this.activeFloor);
-        pending--;
-        if (pending === 0) {
-          this._persist();
-          this.refresh();
-          this.selectScene(scene.id);
-          this._emptyHint(false);
-        }
+        const dataUrl = reader.result;
+        const name = file.name.replace(/\.[^.]+$/, '');
+        const img = new Image();
+        const add = (ratio) => {
+          if (ratio && (ratio < 1.8 || ratio > 2.2)) notPano.push(name);
+          lastScene = this.store.addScene(name, dataUrl, this.activeFloor);
+          done();
+        };
+        img.onload = () => add(img.naturalWidth / img.naturalHeight);
+        img.onerror = () => add(null);   // can't measure → add anyway
+        img.src = dataUrl;
       };
       reader.readAsDataURL(file);
     });
