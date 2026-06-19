@@ -30,17 +30,15 @@ different amounts (**parallax**) and the stitch ghosts or fails.
 2. **Hold the phone portrait** (vertical) — more vertical coverage per shot.
 3. **Lock exposure & focus** (tap-and-hold on most phones) before you start, so
    brightness stays consistent for clean blending.
-4. **Middle ring:** take a photo, rotate ~**30°**, repeat all the way around
-   (**12 photos**). Keep the horizon roughly level.
-5. **Upper ring:** tilt up ~**55°** and shoot **8** around (rotate ~45° each).
-6. **Lower ring:** tilt down ~**55°** and shoot **8** around.
-7. **Zenith + nadir:** one straight up, one straight down — fills the very
-   top/bottom so there's **no dark ceiling or floor**.
-8. Walk to the next room and repeat — each becomes another scene you link with hotspots.
+4. **Middle ring:** take a photo, rotate ~**45°**, repeat all the way around
+   (**8 photos**). Keep the horizon roughly level.
+5. **Upper ring:** tilt up ~**50°** and shoot **3** around (~120° apart).
+6. **Lower ring:** tilt down ~**50°** and shoot **3** around.
+7. Walk to the next room and repeat — each becomes another scene you link with hotspots.
 
-That's **~30 photos** for a full sphere. The in-app **🧭 Guided 360°** runs exactly
-this pattern for you — the reticle dots appear above and below the horizon and at
-the poles, so you just follow them.
+That's just **~14 photos** for a near-full sphere. The in-app **🧭 Guided 360°** runs
+this pattern for you — it shows **one dot at a time** and **auto-captures** when you
+hold it in the crosshair, so you just sweep the phone around and up/down.
 
 ### Numbers that matter
 | Setting | Target | Why |

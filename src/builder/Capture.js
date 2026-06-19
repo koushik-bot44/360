@@ -16,16 +16,16 @@
  * onComplete for stitching → POST /panorama → full-sphere equirectangular.
  */
 
-// Full-sphere target set: middle ring + upper/lower rings + poles.
+// Compact full-sphere target set (~14): middle ring + sparse upper/lower rings.
+// Fewer dots = a quicker, less cluttered capture; the wide vertical FOV of the
+// tilted rings still reaches the poles so there's (almost) no floor/ceiling cap.
 const TARGETS = [
-  ...Array.from({ length: 12 }, (_, i) => ({ key: `m${i}`, label: `${i * 30}°`, az: i * 30, el: 0 })),
-  ...Array.from({ length: 8 }, (_, i) => ({ key: `u${i}`, label: '↑', az: i * 45 + 22.5, el: 55 })),
-  ...Array.from({ length: 8 }, (_, i) => ({ key: `d${i}`, label: '↓', az: i * 45 + 22.5, el: -55 })),
-  { key: 'zen', label: 'Up', az: 0, el: 85 },
-  { key: 'nad', label: 'Down', az: 0, el: -85 },
+  ...Array.from({ length: 8 }, (_, i) => ({ key: `m${i}`, label: `${i * 45}°`, az: i * 45, el: 0 })),
+  ...Array.from({ length: 3 }, (_, i) => ({ key: `u${i}`, label: '↑', az: i * 120 + 30, el: 50 })),
+  ...Array.from({ length: 3 }, (_, i) => ({ key: `d${i}`, label: '↓', az: i * 120 + 30, el: -50 })),
 ];
 
-const MIN_SHOTS = 12;      // at least the middle ring (poles/rings fill in for full sphere)
+const MIN_SHOTS = 8;       // the middle ring alone already gives a usable panorama
 const FOV = 65;            // assumed phone h-fov for projecting dots
 const LOCK_ANGLE = 12;     // deg crosshair must be within target to lock
 const BLUR_MIN = 55;       // laplacian-variance threshold

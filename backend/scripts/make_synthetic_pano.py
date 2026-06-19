@@ -58,17 +58,16 @@ def render(out_dir: Path, n_photos=12, pitch_deg=0.0):
 
 
 def render_sphere(out_dir: Path):
-    """Full-sphere capture: middle ring + upper/lower rings + zenith/nadir.
-    Matches the AR-guided pattern (12 @ 0°, 8 @ ±55°, straight up/down)."""
+    """Compact full-sphere capture matching the AR-guided pattern
+    (8 @ 0°, 3 @ +50°, 3 @ -50° = 14 shots)."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    shots = [(360 * i / 12, 0) for i in range(12)]          # middle ring
-    shots += [(360 * i / 8 + 22.5, 55) for i in range(8)]    # upper ring (offset)
-    shots += [(360 * i / 8 + 22.5, -55) for i in range(8)]   # lower ring
-    shots += [(0, 88), (0, -88)]                             # zenith + nadir
+    shots = [(45 * i, 0) for i in range(8)]                  # middle ring
+    shots += [(120 * i + 30, 50) for i in range(3)]          # upper ring (offset)
+    shots += [(120 * i + 30, -50) for i in range(3)]         # lower ring
     for i, (yaw, pitch) in enumerate(shots):
         cv2.imwrite(str(out_dir / f"shot_{i:02d}.jpg"),
                     _shot(yaw, pitch), [cv2.IMWRITE_JPEG_QUALITY, 92])
-    print(f"rendered {len(shots)} photos (full sphere: 12 mid + 8 up + 8 down + 2 poles) -> {out_dir}")
+    print(f"rendered {len(shots)} photos (compact full sphere: 8 mid + 3 up + 3 down) -> {out_dir}")
 
 
 if __name__ == "__main__":
