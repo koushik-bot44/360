@@ -41,12 +41,14 @@ future scene-positioning. See [`PANORAMA_TOUR.md`](./PANORAMA_TOUR.md) and
 | **`POST /panorama`** endpoint (photos → data-URL panorama + debug) | `backend/app/main.py` | ✅ Working |
 | **🧭 Guided 360° capture** — AR reticle ring (12 @ 30°), crosshair lock, blur reject, **walk detection**, yaw/pitch/timestamp metadata, auto-stitch on completion | `src/builder/Capture.js` | ✅ Verified in-browser |
 | **🧩 Stitch photos** button → adds the panorama as a room scene | `src/builder/Builder.js`, `src/builder.html` | ✅ Verified in-browser |
+| **Auto-link rooms** — `POST /link` (spherical epipolar geometry) → bearing between panoramas; **🔗 Auto-link rooms** drops correctly-aimed hotspots | `backend/app/pipeline/link.py`, `src/builder/Builder.js` | ✅ Verified (0.2° vs ground truth) |
 | Rotation-capture generator + stitch test (good/bad examples) | `backend/scripts/make_synthetic_pano.py`, `stitch_test.py`, `make_capture_examples.py` | ✅ Working |
 | Capture guide (pattern, overlap, good/bad examples) | `CAPTURE_GUIDE.md`, `docs/capture/` | ✅ Done |
 
 Proven: 14 rotation photos → 9,631 matched features → 4096×2048 panorama → sphere viewer,
 look around in every direction (verified by screenshot at multiple yaw angles). Bad captures
-fail with a clear `reason` (too few / no overlap / parallax).
+fail with a clear `reason` (too few / no overlap / parallax). Auto-linking 3 rooms recovered
+every connecting bearing within 0.2° of ground truth and placed correct bidirectional hotspots.
 
 ### Optional reconstruction backend (Phase 2) ✅ REAL RECONSTRUCTION VERIFIED
 | Component | File | Status |

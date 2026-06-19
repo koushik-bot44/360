@@ -58,6 +58,7 @@ uvicorn app.main:app --reload --port 8000
 | Endpoint | Purpose |
 |---|---|
 | **`POST /panorama`** | **stitch overlapping photos → one equirectangular 360° panorama** (multipart `files`); returns the image as a data URL + debug info |
+| **`POST /link`** | **bearing connecting two panoramas** (multipart `a`, `b`) → `dirA`/`dirB` headings + inliers/confidence, for auto-generated hotspots |
 | `POST /tours` | create a job (`{"title": "..."}`) |
 | `POST /tours/{id}/photos` | upload photos (multipart `files`) |
 | `POST /tours/{id}/reconstruct` | run pose estimation + graph (background) |
@@ -111,6 +112,8 @@ the auto-created hotspots.
 |---|---|
 | `scripts/make_synthetic_pano.py [dir] [n] [pitch]` | render a **rotation** capture (photos from one point) — input for stitching |
 | `scripts/stitch_test.py [n]` | render a rotation capture, stitch it → `samples/sample_panorama.jpg` |
+| `scripts/make_pano_at.py [out] [x y z]` | render a full equirectangular panorama from a position in the room |
+| `scripts/link_test.py` | render two panoramas at known positions, check recovered bearings vs ground truth |
 | `scripts/make_capture_examples.py` | generate good/bad capture examples → `../docs/capture/` |
 | `scripts/make_synthetic_room.py [dir] [n]` | render a textured room from a ring of **moving** cameras (for SfM, + ground-truth poses) |
 | `scripts/colmap_test.py` | run the real engine and check recovered poses vs. ground truth (RMSE) |

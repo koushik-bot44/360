@@ -27,6 +27,9 @@ from .schemas import JobCreate, JobStatus, JobList
 from .pipeline.reconstruct import run_job
 from .pipeline import colmap_runner
 from .pipeline.stitch import stitch_panorama
+from .pipeline.link import link_panos
+
+import numpy as np
 
 DATA = Path(__file__).resolve().parent.parent / "data" / "jobs"
 DATA.mkdir(parents=True, exist_ok=True)
@@ -88,6 +91,24 @@ async def panorama(files: list[UploadFile] = File(...)):
         return {"ok": True, "image": data_url, **debug}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _decode(upload_bytes):
+    arr = np.frombuffer(upload_bytes, np.uint8)
+    return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
+
+@app.post("/link")
+async def link(a: UploadFile = File(...), b: UploadFile = File(...)):
+    """Estimate the bearing connecting two panoramas (for auto-generated hotspots).
+    Returns dirA (heading in A toward B), dirB (heading in B toward A), and the
+    match/inlier/confidence stats. `linked` is false when the pair doesn't overlap
+    enough to be considered connected.
+    """
+    imgA, imgB = _decode(await a.read()), _decode(await b.read())
+    if imgA is None or imgB is None:
+        raise HTTPException(422, "could not decode one of the images")
+    return link_panos(imgA, imgB)
 
 
 @app.post("/tours", response_model=JobStatus)

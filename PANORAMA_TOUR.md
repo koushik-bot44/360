@@ -3,11 +3,11 @@
 _The goal: stand inside a room and look freely around — like Zillow 3D Home / Kuula —_
 _not a slideshow of flat photos. This document is the pipeline for getting there._
 
-The good news: **capture, stitch, and viewer are built and verified.** `Capture.js` runs the
-AR-guided ring capture, `POST /panorama` (OpenCV Stitcher) produces the equirectangular, and
-`PanoViewer.js` renders it on a sphere with drag-to-look — the full "stand and look around"
-experience. The remaining piece is **automatic scene linking** (hotspots between rooms) and a
-**full-sphere** capture to remove the floor/ceiling caps.
+The good news: **capture, stitch, viewer, and auto-linking are built and verified.**
+`Capture.js` runs the AR-guided ring capture, `POST /panorama` (OpenCV Stitcher) produces the
+equirectangular, `PanoViewer.js` renders it on a sphere with drag-to-look, and `POST /link`
+auto-detects which rooms connect and places hotspots that point the right way. The remaining
+piece is a **full-sphere** capture to remove the floor/ceiling caps.
 
 ---
 
@@ -119,13 +119,13 @@ Reuse-heavy — most pieces exist:
 | 1. **Guided capture** | AR reticle ring (12 @ 30°), crosshair lock, blur reject, walk detection, yaw/pitch/timestamp metadata, auto-stitch on finish (`Capture.js`) | ✅ **Done** |
 | 2. **Stitch** | `POST /panorama` → OpenCV PANORAMA stitch → 2:1 equirectangular + debug (`stitch.py`) | ✅ **Done** |
 | 3. **Scene** | Equirectangular becomes `scene.image` in the sphere viewer | ✅ **Done** (reused `PanoViewer` + `TourStore`) |
-| 4. Auto-link | Create hotspots from capture order; bearing via pano-to-pano feature match | ⏳ Next |
+| 4. **Auto-link** | `POST /link` — spherical epipolar geometry recovers the bearing between each pair; "🔗 Auto-link rooms" drops hotspots that point the right way | ✅ **Done** (validated 0.2° vs ground truth) |
 | 5. Fallbacks | Manual hotspot editor; 360-camera equirectangular upload; 🧩 stitch-from-files | ✅ Done |
 
 `cubeToEquirect.js` (the old approximate assembler) has been **removed** — the real stitch
 replaces it. The flat node-graph / photo-billboard renderer was also dropped (not this UX).
 
-Milestone order: (1) ✅ backend stitch endpoint; (2) ✅ guided capture; (3) auto-link rooms;
+Milestone order: (1) ✅ backend stitch endpoint; (2) ✅ guided capture; (3) ✅ auto-link rooms;
 (4) full-sphere via Hugin (kill the floor/ceiling caps); (5) optional COLMAP minimap.
 
 ---

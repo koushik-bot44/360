@@ -68,6 +68,8 @@ export default class Builder {
     $('guided-capture-btn').addEventListener('click', () => this._startCapture());
     $('empty-guided-btn').addEventListener('click', () => this._startCapture());
 
+    $('autolink-btn').addEventListener('click', () => this._autoLinkRooms());
+
     $('add-floor-btn').addEventListener('click', () => {
       const name = prompt('Floor name? (e.g. First Floor, Basement)');
       if (!name) return;
@@ -156,6 +158,67 @@ export default class Builder {
 
   _onStitchPhotos(files) {
     this._stitchPanorama(files, null);
+  }
+
+  // ---------- auto-linking rooms ----------
+  _updateAutolink() {
+    const row = $('autolink-row');
+    if (row) row.style.display = this.store.tour.scenes.length >= 2 ? 'flex' : 'none';
+  }
+
+  _ensureHotspot(from, to, dir) {
+    if (from.hotspots.some(h => h.target === to.id)) return false;   // already linked
+    this.store.addHotspot(from.id, dir, to.id, `Go to ${to.name}`);
+    return true;
+  }
+
+  // Compare every pair of panoramas on the backend; where they overlap enough,
+  // drop a hotspot in each that points toward the other room.
+  async _autoLinkRooms() {
+    const scenes = this.store.tour.scenes.filter(s => s.image);
+    const note = $('autolink-note');
+    const show = (m) => { note.textContent = m; note.classList.remove('hidden'); };
+    if (scenes.length < 2) return;
+
+    const pairs = [];
+    for (let i = 0; i < scenes.length; i++)
+      for (let j = i + 1; j < scenes.length; j++) pairs.push([scenes[i], scenes[j]]);
+
+    const btn = $('autolink-btn');
+    btn.disabled = true;
+    show(`Linking ${scenes.length} rooms — comparing ${pairs.length} pair${pairs.length > 1 ? 's' : ''}…`);
+
+    const blobOf = async (s) => (await fetch(s.image)).blob();
+    let linked = 0, skipped = 0; const details = [];
+    try {
+      for (const [A, B] of pairs) {
+        const fd = new FormData();
+        fd.append('a', await blobOf(A), 'a.jpg');
+        fd.append('b', await blobOf(B), 'b.jpg');
+        const res = await fetch(`${PANO_BACKEND}/link`, { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.linked) {
+          const added = this._ensureHotspot(A, B, data.dirA) | this._ensureHotspot(B, A, data.dirB);
+          if (added) { linked++; details.push(`${A.name}↔${B.name} (${data.inliers})`); }
+        } else { skipped++; }
+      }
+    } catch (e) {
+      btn.disabled = false;
+      show(`Could not reach the backend at ${PANO_BACKEND}. Start it: cd backend && uvicorn app.main:app --port 8000`);
+      return;
+    }
+
+    btn.disabled = false;
+    await this._persist();
+    this.refresh();
+    if (this.currentSceneId) {
+      const cur = this.store.getScene(this.currentSceneId);
+      if (cur) this.viewer.setHotspots(cur.hotspots);
+    }
+    show(linked
+      ? `✓ Linked ${linked} pair(s): ${details.join(', ')}.${skipped ? ` ${skipped} not connected (skipped).` : ''}`
+      : 'No connected rooms found — panoramas need overlapping views to link.');
+    setTimeout(() => note.classList.add('hidden'), 12000);
   }
 
   // ---------- AR-guided capture ----------
@@ -429,6 +492,7 @@ export default class Builder {
     this._renderFloors();
     this._renderScenes();
     this._renderHotspots();
+    this._updateAutolink();
   }
 
   _persist() {
