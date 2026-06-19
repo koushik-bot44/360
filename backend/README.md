@@ -57,12 +57,33 @@ uvicorn app.main:app --reload --port 8000
 
 | Endpoint | Purpose |
 |---|---|
+| **`POST /panorama`** | **stitch overlapping photos → one equirectangular 360° panorama** (multipart `files`); returns the image as a data URL + debug info |
 | `POST /tours` | create a job (`{"title": "..."}`) |
 | `POST /tours/{id}/photos` | upload photos (multipart `files`) |
 | `POST /tours/{id}/reconstruct` | run pose estimation + graph (background) |
 | `GET  /tours/{id}` | status (+ `tour_url` when ready) |
 | `GET  /tours/{id}/tour.json` | the generated tour |
 | `GET  /health` | reports whether COLMAP is available |
+
+### Panorama stitching (the primary path → true 360° tour)
+`POST /panorama` is the heart of the panorama product (see `../PANORAMA_TOUR.md` and
+`../CAPTURE_GUIDE.md`). Upload 10–20 overlapping photos taken by **rotating in place**;
+it runs OpenCV's Stitcher (PANORAMA mode), maps the result to a 2:1 equirectangular
+image, and returns it ready for the sphere viewer. The builder's **🧩 Stitch photos**
+button calls this and adds the result as a room scene automatically.
+
+```bash
+curl -s -X POST localhost:8000/panorama \
+     $(for f in shots/*.jpg; do echo -F "files=@$f"; done) \
+     | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["status"], d.get("output_resolution"), d["num_matches"],"matches")'
+```
+
+Returns: `num_images_used`, `num_features`, `num_matches`, `status`/`reason`,
+`output_resolution`, `vertical_fov_deg`. Verify offline (renders a rotation capture,
+stitches it, saves `samples/sample_panorama.jpg`):
+```bash
+python scripts/stitch_test.py 14
+```
 
 ### Example
 ```bash
@@ -88,7 +109,10 @@ the auto-created hotspots.
 ## Scripts
 | Script | What it does |
 |---|---|
-| `scripts/make_synthetic_room.py [dir] [n]` | render a textured room from a ring of cameras (+ ground-truth poses) |
+| `scripts/make_synthetic_pano.py [dir] [n] [pitch]` | render a **rotation** capture (photos from one point) — input for stitching |
+| `scripts/stitch_test.py [n]` | render a rotation capture, stitch it → `samples/sample_panorama.jpg` |
+| `scripts/make_capture_examples.py` | generate good/bad capture examples → `../docs/capture/` |
+| `scripts/make_synthetic_room.py [dir] [n]` | render a textured room from a ring of **moving** cameras (for SfM, + ground-truth poses) |
 | `scripts/colmap_test.py` | run the real engine and check recovered poses vs. ground truth (RMSE) |
 | `scripts/real_tour_demo.py` | full pipeline on real reconstruction → `samples/sample_tour_colmap.json` |
 | `scripts/smoke_test.py` | fast end-to-end check (mock path, no COLMAP needed) |

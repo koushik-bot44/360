@@ -11,6 +11,11 @@ import cubeToEquirect from './cubeToEquirect';
 
 const $ = (id) => document.getElementById(id);
 
+// Local panorama-stitching backend (FastAPI). Override at runtime by setting
+// localStorage 'panoBackend' (e.g. if you run uvicorn on another port/host).
+const PANO_BACKEND = (typeof localStorage !== 'undefined' && localStorage.getItem('panoBackend'))
+  || 'http://localhost:8000';
+
 export default class Builder {
   constructor() {
     this.viewer = new PanoViewer($('pano-canvas'));
@@ -56,6 +61,10 @@ export default class Builder {
     $('upload-input').addEventListener('change', (e) => this._onUpload(e.target.files));
     $('add-photos-btn').addEventListener('click', () => $('upload-input').click());
     $('empty-upload-btn').addEventListener('click', () => $('upload-input').click());
+
+    $('stitch-input').addEventListener('change', (e) => this._onStitchPhotos(e.target.files));
+    $('stitch-photos-btn').addEventListener('click', () => $('stitch-input').click());
+    $('empty-stitch-btn').addEventListener('click', () => $('stitch-input').click());
 
     $('capture-room-btn').addEventListener('click', () => this._startCapture());
     $('empty-capture-btn').addEventListener('click', () => this._startCapture());
@@ -103,6 +112,47 @@ export default class Builder {
       };
       reader.readAsDataURL(file);
     });
+  }
+
+  // ---------- panorama stitching (backend) ----------
+  async _onStitchPhotos(files) {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    const note = $('stitch-note');
+    const show = (msg) => { note.textContent = msg; note.classList.remove('hidden'); };
+    if (list.length < 6) {
+      show(`Only ${list.length} photos — stitching usually needs 10–20 overlapping shots. Trying anyway…`);
+    } else {
+      show(`Stitching ${list.length} photos into a panorama… (this runs on your local backend)`);
+    }
+
+    const form = new FormData();
+    list.forEach((f) => form.append('files', f, f.name));
+
+    let res, data;
+    try {
+      res = await fetch(`${PANO_BACKEND}/panorama`, { method: 'POST', body: form });
+      data = await res.json();
+    } catch (e) {
+      show(`Could not reach the stitching backend at ${PANO_BACKEND}. Start it with: cd backend && uvicorn app.main:app --port 8000`);
+      return;
+    }
+
+    if (!data.ok) {
+      show(`Stitch failed: ${data.reason || 'unknown error'} (used ${data.num_images_used || 0}/${list.length} photos, ${data.num_matches || 0} matched features).`);
+      return;
+    }
+
+    // success → add the panorama as a room scene and show it immediately
+    const name = `Room ${this.store.tour.scenes.length + 1}`;
+    const scene = this.store.addScene(name, data.image, this.activeFloor);
+    await this._persist();
+    this.refresh();
+    this.selectScene(scene.id);
+    this._emptyHint(false);
+    const [w, h] = data.output_resolution || [];
+    show(`✓ Panorama added — ${data.num_images_used} photos, ${data.num_matches} matched features, ${w}×${h}px (vertical FOV ~${data.vertical_fov_deg}°). Drag to look around.`);
+    setTimeout(() => note.classList.add('hidden'), 9000);
   }
 
   // ---------- camera capture ----------

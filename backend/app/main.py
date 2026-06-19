@@ -1,6 +1,7 @@
 """FastAPI app — local proof-of-concept API.
 
 Flow:
+  POST /panorama                    -> stitch overlapping photos into one 360° pano
   POST /tours                       -> create a job
   POST /tours/{id}/photos           -> upload 10-30 phone photos (multipart)
   POST /tours/{id}/reconstruct      -> run pose estimation + graph (background)
@@ -8,8 +9,13 @@ Flow:
   GET  /tours/{id}/tour.json        -> the generated tour (loadable by the viewer)
   GET  /tours/{id}/images/<file>    -> the uploaded photos
 """
+import base64
+import shutil
+import tempfile
 import uuid
 from pathlib import Path
+
+import cv2
 
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +26,7 @@ from . import db
 from .schemas import JobCreate, JobStatus, JobList
 from .pipeline.reconstruct import run_job
 from .pipeline import colmap_runner
+from .pipeline.stitch import stitch_panorama
 
 DATA = Path(__file__).resolve().parent.parent / "data" / "jobs"
 DATA.mkdir(parents=True, exist_ok=True)
@@ -50,6 +57,37 @@ def _status(job, request: Request) -> JobStatus:
 def health():
     return {"ok": True, "colmap": colmap_runner.is_available(),
             "engine": colmap_runner.engine_name()}
+
+
+@app.post("/panorama")
+async def panorama(files: list[UploadFile] = File(...)):
+    """Stitch 10–20 overlapping photos (taken by rotating in place) into one
+    equirectangular panorama. Returns the image as a data URL plus debug info
+    (images used, matched features, success/failure reason, output resolution).
+    """
+    tmp = Path(tempfile.mkdtemp(prefix="pano_"))
+    try:
+        paths = []
+        for i, f in enumerate(files):
+            data = await f.read()
+            if not data:
+                continue
+            ext = Path(f.filename or "").suffix.lower() or ".jpg"
+            p = tmp / f"{i:03d}{ext}"
+            p.write_bytes(data)
+            paths.append(p)
+
+        equirect, debug = stitch_panorama(paths)
+        if equirect is None:
+            return JSONResponse(status_code=422, content={"ok": False, **debug})
+
+        ok, buf = cv2.imencode(".jpg", equirect, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        if not ok:
+            raise HTTPException(500, "failed to encode panorama")
+        data_url = "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
+        return {"ok": True, "image": data_url, **debug}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 @app.post("/tours", response_model=JobStatus)

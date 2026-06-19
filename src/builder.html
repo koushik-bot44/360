@@ -41,9 +41,12 @@
       </div>
       <div class="add-row">
         <button id="add-photos-btn" class="btn tiny solid">＋ Upload 360°</button>
+        <button id="stitch-photos-btn" class="btn tiny" title="Stitch 10–20 overlapping phone photos (rotate in place) into a 360° panorama">🧩 Stitch photos</button>
         <button id="capture-room-btn" class="btn tiny" title="Experimental: guided phone capture (assembled result may show seams)">📷 Capture</button>
       </div>
       <input id="upload-input" type="file" accept="image/*" multiple class="sr-only" />
+      <input id="stitch-input" type="file" accept="image/*" multiple class="sr-only" />
+      <div id="stitch-note" class="muted small hidden" style="padding:6px 2px"></div>
 
       <div class="floor-bar">
         <div id="floor-pills" class="floor-pills"></div>
@@ -82,9 +85,10 @@
           <p>Upload 360° photos (from any 360 camera or your phone's Photo&nbsp;Sphere mode) — each becomes a room you connect with hotspots. This gives the cleanest, seam-free result.</p>
           <div class="empty-actions">
             <button id="empty-upload-btn" class="btn solid">＋ Upload 360° photos</button>
+            <button id="empty-stitch-btn" class="btn">🧩 Stitch from phone photos</button>
             <button id="empty-capture-btn" class="btn">📷 Try phone capture</button>
           </div>
-          <p class="empty-hint muted small">Phone capture is experimental — it assembles several shots and may show seams.</p>
+          <p class="empty-hint muted small">No 360° camera? Take 10–20 overlapping photos by rotating in place and let the stitcher build the panorama for you (see the capture guide).</p>
         </div>
       </div>
     </section>

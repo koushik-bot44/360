@@ -10,11 +10,13 @@ alongside [`ARCHITECTURE.md`](./ARCHITECTURE.md) (the design for the full system
 
 ## 1. One-line summary
 
-A working **360° tour builder** (Phase 1, production-quality for a student project) plus a
-**local proof-of-concept reconstruction backend** (Phase 2) that turns ordinary phone photos
-into an auto-generated tour graph the existing viewer can load. **Real reconstruction is now
-verified** (pycolmap: 20/20 synthetic poses, RMSE 0.5%), and the perspective-photo distortion
-is fixed by a new flat **node-graph renderer** in the viewer.
+A working **360° tour builder** (Phase 1) plus a local **panorama-stitching pipeline** (the
+chosen product direction): upload 10–20 overlapping phone photos → OpenCV Stitcher →
+equirectangular panorama → loads straight into the sphere viewer as a room scene. Verified
+end-to-end in the browser (`POST /panorama`, the builder's **🧩 Stitch photos** button). A
+separate, optional **pycolmap reconstruction** track (20/20 poses, RMSE 0.5%) remains for
+future scene-positioning. See [`PANORAMA_TOUR.md`](./PANORAMA_TOUR.md) and
+[`CAPTURE_GUIDE.md`](./CAPTURE_GUIDE.md).
 
 ---
 
@@ -32,7 +34,20 @@ is fixed by a new flat **node-graph renderer** in the viewer.
 | **IndexedDB** storage (auto-migrates old localStorage tours, surfaces quota errors) | ✅ Working |
 | Bundled real 360° demo tour | ✅ Working |
 
-### Phase 2 — Reconstruction backend (POC) ✅ REAL RECONSTRUCTION VERIFIED
+### Panorama pipeline (the product) ✅ VERIFIED END-TO-END
+| Component | File | Status |
+|---|---|---|
+| **Stitcher** — OpenCV Stitcher (PANORAMA) → 2:1 equirectangular + debug info | `backend/app/pipeline/stitch.py` | ✅ Working |
+| **`POST /panorama`** endpoint (photos → data-URL panorama + debug) | `backend/app/main.py` | ✅ Working |
+| **🧩 Stitch photos** button → adds the panorama as a room scene | `src/builder/Builder.js`, `src/builder.html` | ✅ Verified in-browser |
+| Rotation-capture generator + stitch test (good/bad examples) | `backend/scripts/make_synthetic_pano.py`, `stitch_test.py`, `make_capture_examples.py` | ✅ Working |
+| Capture guide (pattern, overlap, good/bad examples) | `CAPTURE_GUIDE.md`, `docs/capture/` | ✅ Done |
+
+Proven: 14 rotation photos → 9,631 matched features → 4096×2048 panorama → sphere viewer,
+look around in every direction (verified by screenshot at multiple yaw angles). Bad captures
+fail with a clear `reason` (too few / no overlap / parallax).
+
+### Optional reconstruction backend (Phase 2) ✅ REAL RECONSTRUCTION VERIFIED
 | Component | File | Status |
 |---|---|---|
 | FastAPI app (create job → upload photos → reconstruct → poll → tour.json) | `backend/app/main.py` | ✅ Working |
