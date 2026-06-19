@@ -7,6 +7,7 @@
 import PanoViewer from './PanoViewer';
 import TourStore from './TourStore';
 import Capture from './Capture';
+import Minimap from './Minimap';
 
 const $ = (id) => document.getElementById(id);
 
@@ -22,7 +23,24 @@ export default class Builder {
     this.placing = false;
     this.activeFloor = null;
     this.capture = new Capture((result) => this._onCaptured(result));
+    this.minimap = new Minimap($('minimap'), (id) => this._onMinimapSelect(id));
     this._boot();
+  }
+
+  // ---------- floor-plan minimap ----------
+  _renderMinimap() {
+    const wrap = $('minimap-wrap');
+    if (!this.store || !this.currentSceneId) { wrap.style.display = 'none'; return; }
+    const cur = this.store.getScene(this.currentSceneId);
+    const rooms = this.store.scenesOnFloor(cur ? cur.floor : this.activeFloor);
+    if (rooms.length < 2) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'block';          // visible first so the canvas has a size
+    this.minimap.update(rooms, this.currentSceneId);
+  }
+
+  _onMinimapSelect(id) {
+    if (document.body.classList.contains('play-mode')) this._playLoad(id);
+    else this.selectScene(id);
   }
 
   // storage (IndexedDB) loads asynchronously
@@ -215,6 +233,7 @@ export default class Builder {
       const cur = this.store.getScene(this.currentSceneId);
       if (cur) this.viewer.setHotspots(cur.hotspots);
     }
+    this._renderMinimap();
     show(linked
       ? `✓ Linked ${linked} pair(s): ${details.join(', ')}.${skipped ? ` ${skipped} not connected (skipped).` : ''}`
       : 'No connected rooms found — panoramas need overlapping views to link.');
@@ -260,6 +279,7 @@ export default class Builder {
     this._renderFloors();
     this._renderScenes();
     this._renderHotspots();
+    this._renderMinimap();
     $('current-scene-name').textContent = scene.name;
   }
 
@@ -422,6 +442,7 @@ export default class Builder {
       $('play-scene-name').textContent = `${scene.name} · ${scene.floor}`;
     });
     this._renderPlayFloors();
+    this._renderMinimap();
   }
 
   _renderPlayFloors() {

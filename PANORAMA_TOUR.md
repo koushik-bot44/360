@@ -128,8 +128,9 @@ Reuse-heavy — most pieces exist:
 replaces it. The flat node-graph / photo-billboard renderer was also dropped (not this UX).
 
 Milestone order: (1) ✅ backend stitch endpoint; (2) ✅ guided capture; (3) ✅ auto-link rooms;
-(4) ✅ full-sphere multi-ring capture (caps gone); (5) polish: production-grade poles via
-Hugin, optional COLMAP minimap.
+(4) ✅ full-sphere multi-ring capture (caps gone); (5) ✅ floor-plan minimap (schematic, from
+link bearings); (6) polish left: production-grade poles via Hugin, metric distances/minimap
+from a light COLMAP pass, real-device field testing.
 
 ---
 

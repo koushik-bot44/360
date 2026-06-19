@@ -42,6 +42,7 @@ future scene-positioning. See [`PANORAMA_TOUR.md`](./PANORAMA_TOUR.md) and
 | **🧭 Guided 360° capture** — AR **full-sphere** pattern (12 mid + 8 up + 8 down + 2 poles), crosshair lock, blur reject, **walk detection**, yaw/pitch metadata, auto-stitch | `src/builder/Capture.js` | ✅ Verified in-browser (vertical FOV ~180°, no caps) |
 | **🧩 Stitch photos** button → adds the panorama as a room scene | `src/builder/Builder.js`, `src/builder.html` | ✅ Verified in-browser |
 | **Auto-link rooms** — `POST /link` (spherical epipolar geometry) → bearing between panoramas; **🔗 Auto-link rooms** drops correctly-aimed hotspots | `backend/app/pipeline/link.py`, `src/builder/Builder.js` | ✅ Verified (0.2° vs ground truth) |
+| **Floor-plan minimap** — schematic top-down map from link bearings (spanning-tree layout), current room highlighted, click-to-travel; shown in build + play | `src/builder/Minimap.js` | ✅ Verified in-browser |
 | Rotation-capture generator + stitch test (good/bad examples) | `backend/scripts/make_synthetic_pano.py`, `stitch_test.py`, `make_capture_examples.py` | ✅ Working |
 | Capture guide (pattern, overlap, good/bad examples) | `CAPTURE_GUIDE.md`, `docs/capture/` | ✅ Done |
 

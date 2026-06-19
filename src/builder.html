@@ -76,6 +76,12 @@
     <section class="stage">
       <canvas id="pano-canvas" class="pano-canvas"></canvas>
 
+      <!-- schematic floor-plan minimap (rooms + links; click to travel) -->
+      <div id="minimap-wrap" class="minimap-wrap" style="display:none">
+        <div class="minimap-title">Floor plan</div>
+        <canvas id="minimap" class="minimap"></canvas>
+      </div>
+
       <div class="stage-overlay top">
         <div class="scene-chip"><span id="current-scene-name">—</span></div>
         <button id="add-hotspot-btn" class="btn small">＋ Add hotspot</button>
