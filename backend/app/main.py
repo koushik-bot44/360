@@ -81,6 +81,13 @@ async def panorama(files: list[UploadFile] = File(...)):
             paths.append(p)
 
         equirect, debug = stitch_panorama(paths)
+        print(
+            f"[panorama] in={debug.get('num_images_input')} used={debug.get('num_images_used')} "
+            f"matches={debug.get('num_matches')} engine={debug.get('engine')} "
+            f"-> {debug.get('status')}: {debug.get('reason')}"
+            + (f" (hugin fell back: {debug['hugin_reason']})" if debug.get('hugin_reason') else ""),
+            flush=True,
+        )
         if equirect is None:
             return JSONResponse(status_code=422, content={"ok": False, **debug})
 
