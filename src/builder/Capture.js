@@ -3,8 +3,8 @@
  *
  * Opens the device camera and overlays reticle dots at the yaw/pitch positions
  * still to be shot. The pattern is three rings + the two poles for full 360×180
- * coverage (no dark floor/ceiling): a middle ring (8 @ 0°), an upper ring
- * (5 @ +45°), a lower ring (5 @ −45°), and an explicit zenith/nadir — 20 targets.
+ * coverage (no dark floor/ceiling): a dense middle ring (12 @ 0°, every 30°), an
+ * upper ring (6 @ +45°), a lower ring (6 @ −45°), and zenith/nadir — 26 targets.
  * To stay clean (like a guided street-view capture) only the NEXT target dot is
  * shown at a time; aim it into the crosshair and — once aligned and steady for a
  * moment — it AUTO-captures (no tapping). Each target is a DIRECTION on a sphere
@@ -19,14 +19,15 @@
  */
 import * as THREE from 'three';
 
-// Full-sphere target set (20): a middle ring + denser upper/lower rings + an
-// explicit zenith (straight up) and nadir (straight down). More overlap — and
-// real pole shots — give the stitcher much more to match at the ceiling/floor,
-// where sparse coverage previously left caps/seams. ~36% overlap at FOV 65.
+// Full-sphere target set (26): a DENSE middle ring (every 30°) + upper/lower
+// rings (every 60°) + explicit zenith/nadir. Tight spacing matters because a
+// phone in portrait has only ~50° horizontal FOV — at 45° spacing consecutive
+// shots barely overlapped (~10%), so the ring wouldn't close and the panorama
+// collapsed. 30° spacing gives ~40% overlap → the stitcher can lock the loop.
 const TARGETS = [
-  ...Array.from({ length: 8 }, (_, i) => ({ key: `m${i}`, label: `${i * 45}°`, az: i * 45, el: 0 })),
-  ...Array.from({ length: 5 }, (_, i) => ({ key: `u${i}`, label: '↑', az: i * 72 + 36, el: 45 })),
-  ...Array.from({ length: 5 }, (_, i) => ({ key: `d${i}`, label: '↓', az: i * 72, el: -45 })),
+  ...Array.from({ length: 12 }, (_, i) => ({ key: `m${i}`, label: `${i * 30}°`, az: i * 30, el: 0 })),
+  ...Array.from({ length: 6 }, (_, i) => ({ key: `u${i}`, label: '↑', az: i * 60 + 30, el: 45 })),
+  ...Array.from({ length: 6 }, (_, i) => ({ key: `d${i}`, label: '↓', az: i * 60, el: -45 })),
   { key: 'zen', label: '⤒ up', az: 0, el: 85 },
   { key: 'nad', label: '⤓ down', az: 0, el: -85 },
 ];

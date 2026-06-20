@@ -80,6 +80,17 @@ async def panorama(files: list[UploadFile] = File(...)):
             p.write_bytes(data)
             paths.append(p)
 
+        # Keep the last capture's input photos for debugging stitch failures.
+        try:
+            cap_dir = DATA.parent / "last_capture"
+            if cap_dir.exists():
+                shutil.rmtree(cap_dir, ignore_errors=True)
+            cap_dir.mkdir(parents=True, exist_ok=True)
+            for p in paths:
+                shutil.copy2(p, cap_dir / p.name)
+        except Exception:
+            pass
+
         equirect, debug = stitch_panorama(paths)
         print(
             f"[panorama] in={debug.get('num_images_input')} used={debug.get('num_images_used')} "
@@ -94,6 +105,12 @@ async def panorama(files: list[UploadFile] = File(...)):
         ok, buf = cv2.imencode(".jpg", equirect, [cv2.IMWRITE_JPEG_QUALITY, 88])
         if not ok:
             raise HTTPException(500, "failed to encode panorama")
+        # Keep the last stitched panorama on disk for inspection/debugging.
+        try:
+            dbg = DATA.parent / "last_panorama.jpg"
+            dbg.write_bytes(buf.tobytes())
+        except Exception:
+            pass
         data_url = "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
         return {"ok": True, "image": data_url, **debug}
     finally:
