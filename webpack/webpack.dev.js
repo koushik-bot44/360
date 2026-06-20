@@ -36,6 +36,14 @@ module.exports = merge(
               publicPath: "/",
               watch: true,
             },
+            // Proxy the stitching backend so a PHONE can reach it: the app is
+            // served over https, and a browser blocks an https page from calling
+            // the plain-http backend directly (mixed content). Forwarding these
+            // routes through the dev server keeps them same-origin https.
+            proxy: {
+              '/panorama': { target: 'http://localhost:8000', changeOrigin: true, secure: false },
+              '/link': { target: 'http://localhost:8000', changeOrigin: true, secure: false },
+            },
         }
     }
 )

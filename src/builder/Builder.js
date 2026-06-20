@@ -11,10 +11,12 @@ import Minimap from './Minimap';
 
 const $ = (id) => document.getElementById(id);
 
-// Local panorama-stitching backend (FastAPI). Override at runtime by setting
-// localStorage 'panoBackend' (e.g. if you run uvicorn on another port/host).
+// Panorama-stitching backend (FastAPI). Default is SAME-ORIGIN ('') so requests
+// go through the dev-server proxy (see webpack.dev.js) — this is what lets a
+// phone on https reach the http backend without mixed-content blocking. Override
+// at runtime with localStorage 'panoBackend' (e.g. a different host/port).
 const PANO_BACKEND = (typeof localStorage !== 'undefined' && localStorage.getItem('panoBackend'))
-  || 'http://localhost:8000';
+  || '';
 
 export default class Builder {
   constructor() {
@@ -178,7 +180,7 @@ export default class Builder {
       const res = await fetch(`${PANO_BACKEND}/panorama`, { method: 'POST', body: form });
       data = await res.json();
     } catch (e) {
-      show(`Could not reach the stitching backend at ${PANO_BACKEND}. Start it with: cd backend && uvicorn app.main:app --port 8000`);
+      show(`Could not reach the stitching backend${PANO_BACKEND ? ` at ${PANO_BACKEND}` : ''}. Start it with: cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000`);
       return;
     }
 
@@ -246,7 +248,7 @@ export default class Builder {
       }
     } catch (e) {
       btn.disabled = false;
-      show(`Could not reach the backend at ${PANO_BACKEND}. Start it: cd backend && uvicorn app.main:app --port 8000`);
+      show(`Could not reach the backend${PANO_BACKEND ? ` at ${PANO_BACKEND}` : ''}. Start it: cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000`);
       return;
     }
 
