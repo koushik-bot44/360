@@ -7,14 +7,17 @@
  * (8 @ +55°), a lower ring (8 @ −55°), and zenith/nadir — 30 targets.
  * To stay clean (like a guided street-view capture) only the NEXT target dot is
  * shown at a time; aim it into the crosshair and — once aligned and steady for a
- * moment — it AUTO-captures (no tapping). Orientation is low-pass smoothed so the
- * dot doesn't jitter. On a phone the dot tracks your motion (DeviceOrientationEvent);
- * on desktop you drag to look.
+ * moment — it AUTO-captures (no tapping). Each target is a DIRECTION on a sphere
+ * (yaw/pitch); we project it through the phone's live orientation quaternion, so
+ * the dot stays WORLD-LOCKED — pinned to its real point on the wall (like VR
+ * geometry) instead of sliding with the screen. On a phone the dot tracks your
+ * motion (DeviceOrientationEvent); on desktop you drag to look.
  * Quality gates: blur rejection (variance of Laplacian) and walk detection
  * (accelerometer warns if you translate instead of rotating). When enough is
  * captured it hands an ordered list of JPEG blobs (named by yaw/pitch) to
  * onComplete for stitching → POST /panorama → full-sphere equirectangular.
  */
+import * as THREE from 'three';
 
 // Compact full-sphere target set (~14): middle ring + sparse upper/lower rings.
 // Fewer dots = a quicker, less cluttered capture; the wide vertical FOV of the
@@ -26,15 +29,49 @@ const TARGETS = [
 ];
 
 const MIN_SHOTS = 8;       // the middle ring alone already gives a usable panorama
-const FOV = 65;            // assumed phone h-fov for projecting dots
-const LOCK_ANGLE = 12;     // deg crosshair must be within target to lock
+const FOV = 65;            // assumed phone horizontal FOV (deg) for projecting dots
+const LOCK_ANGLE = 12;     // deg between aim and target to lock
 const BLUR_MIN = 55;       // laplacian-variance threshold
 const WALK_ACCEL = 2.2;    // m/s² (gravity-excluded) sustained ⇒ "you're walking"
 const STICKY_MARGIN = 18;  // deg another target must beat the current one by to take over
 const AUTO_MS = 650;       // hold aligned this long → auto-capture (hands-free)
+const Q_SMOOTH = 0.35;     // orientation slerp per frame — light, so it stays responsive
+const DEG = Math.PI / 180;
 
 const $ = (id) => document.getElementById(id);
-function angDiff(a, b) { let d = ((a - b + 540) % 360) - 180; return d; }
+
+// --- World-locked projection ------------------------------------------------
+// A panorama assumes you rotate in place, so each target is a fixed DIRECTION on
+// a unit sphere (yaw=az, pitch=el). We build the phone's orientation quaternion
+// and perspective-project the direction onto the screen, so the dot stays pinned
+// to its real-world point (including phone roll) — not just slid linearly.
+const _zee = new THREE.Vector3(0, 0, 1);
+const _euler = new THREE.Euler();
+const _q0 = new THREE.Quaternion();
+const _q1 = new THREE.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2); // screen→world (−90° about X)
+const _m = new THREE.Matrix4();
+const _origin = new THREE.Vector3(0, 0, 0);
+const _up = new THREE.Vector3(0, 1, 0);
+
+function vecFromAzEl(az, el) {                 // (deg) → unit direction on the sphere
+  const a = az * DEG, ce = Math.cos(el * DEG);
+  return new THREE.Vector3(ce * Math.sin(a), Math.sin(el * DEG), -ce * Math.cos(a));
+}
+function targetVec(t) { return t._vec || (t._vec = vecFromAzEl(t.az, t.el)); }
+
+// device orientation (deg) → camera world quaternion (W3C / THREE convention)
+function deviceQuaternion(out, alpha, beta, gamma, screen) {
+  _euler.set(beta * DEG, alpha * DEG, -gamma * DEG, 'YXZ');
+  out.setFromEuler(_euler);
+  out.multiply(_q1);                                       // camera looks out the back
+  out.multiply(_q0.setFromAxisAngle(_zee, -screen * DEG)); // compensate screen rotation
+  return out;
+}
+// manual / desktop fallback: aim the camera at an az/el coming from drag
+function lookQuaternion(out, az, el) {
+  _m.lookAt(_origin, vecFromAzEl(az, el), _up);
+  return out.setFromRotationMatrix(_m);
+}
 
 export default class Capture {
   constructor(onComplete) {
@@ -89,18 +126,9 @@ export default class Capture {
   async _initMotion() {
     this._onOrient = (e) => {
       if (e.alpha == null) return;
-      const tAz = (360 - e.alpha) % 360;                         // target yaw
-      const tEl = Math.max(-90, Math.min(90, (e.beta || 90) - 90)); // target pitch
-      if (!this.hasOrientation) { this.az = tAz; this.el = tEl; } // snap on first reading
-      else {
-        // Adaptive low-pass (1€-filter style): a flat factor can't tell a real
-        // turn from compass micro-jitter. _gain() returns ~0 for tiny wobble
-        // (dot holds still) but rises for genuine motion (dot still tracks).
-        let d = ((tAz - this.az + 540) % 360) - 180;
-        this.az = (this.az + d * this._gain(Math.abs(d)) + 360) % 360;
-        const de = tEl - this.el;
-        this.el += de * this._gain(Math.abs(de));
-      }
+      // Just store the raw reading; the quaternion is built and smoothed in the
+      // loop (smoothing the full orientation, not a single noisy compass angle).
+      this._dev = { alpha: e.alpha, beta: e.beta || 0, gamma: e.gamma || 0 };
       this.hasOrientation = true;
     };
     // accelerometer → detect physical translation (walking) vs pure rotation
@@ -123,13 +151,16 @@ export default class Capture {
     setTimeout(() => { this.manual = !this.hasOrientation; this.root.classList.toggle('manual-mode', this.manual); }, 700);
   }
 
-  // deg-of-change-per-event → smoothing weight. A deadband kills sensor jitter
-  // when you're holding still; the weight ramps up so fast turns still track.
-  _gain(speed) {
-    if (speed < 0.6) return 0;     // deadband: ignore micro-jitter entirely
-    if (speed < 3)   return 0.12;
-    if (speed < 10)  return 0.3;
-    return 0.5;
+  // current screen-rotation angle (deg) so projection holds when the phone rolls
+  _screenAngle() {
+    return (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+  }
+  // half-FOV tangents (h from FOV, v from the overlay's aspect) for projection
+  _fovTan() {
+    const r = this.dotsLayer.getBoundingClientRect();
+    const aspect = (r.width && r.height) ? r.height / r.width : 16 / 9;
+    const thx = Math.tan((FOV * DEG) / 2);
+    return { thx, thy: thx * aspect };
   }
 
   // ---------- render loop ----------
@@ -139,32 +170,63 @@ export default class Capture {
     const remaining = TARGETS.filter(t => !this.captured[t.key]);
     const done = TARGETS.length - remaining.length;
     $('cap-progress').textContent = `${done}/${TARGETS.length}`;
-    this.needle.style.transform = `rotate(${this.az}deg)`;
 
-    // The single next target — we show ONLY this one to keep the screen clean.
-    // It's STICKY: keep the current target until it's captured, and switch to
-    // another only when that other is clearly (STICKY_MARGIN°) closer. Without
-    // this, two near-equidistant targets flip back and forth on every wobble of
-    // the compass, so a different dot flashes each frame ("too many dots").
+    // 1) Camera orientation quaternion (sensors on a phone, drag on desktop),
+    //    slerped toward the latest reading. Smoothing the WHOLE orientation —
+    //    not one noisy compass angle — is what stops the dot from shaking.
+    const qt = this._qTarget || (this._qTarget = new THREE.Quaternion());
+    if (this.hasOrientation && this._dev) {
+      deviceQuaternion(qt, this._dev.alpha, this._dev.beta, this._dev.gamma, this._screenAngle());
+    } else {
+      lookQuaternion(qt, this.az, this.el);            // manual: aim from drag az/el
+    }
+    if (!this._q) this._q = qt.clone();
+    else this._q.slerp(qt, this.hasOrientation ? Q_SMOOTH : 1);
+
+    // 2) Aim direction → az/el (drives the compass needle; in sensor mode keeps
+    //    this.az/el in sync with the smoothed quaternion).
+    const fwd = (this._fwd || (this._fwd = new THREE.Vector3())).set(0, 0, -1).applyQuaternion(this._q);
+    if (this.hasOrientation) {
+      this.az = (Math.atan2(fwd.x, -fwd.z) / DEG + 360) % 360;
+      this.el = Math.asin(Math.max(-1, Math.min(1, fwd.y))) / DEG;
+    }
+    this.needle.style.transform = `rotate(${this.az}deg)`;
+    const invQ = (this._invQ || (this._invQ = new THREE.Quaternion())).copy(this._q).invert();
+
+    // 3) Next target — STICKY, by TRUE angular distance between aim and target:
+    //    keep the current one until it's captured, switching only when another
+    //    is clearly (STICKY_MARGIN°) closer, so the dot never flickers between
+    //    two near-equidistant targets ("too many dots").
+    const angTo = (t) => fwd.angleTo(targetVec(t)) / DEG;
     let cur = (this._target && !this.captured[this._target.key]) ? this._target : null;
-    let nearest = cur;
-    let nearestDist = cur ? Math.hypot(angDiff(cur.az, this.az), cur.el - this.el) : Infinity;
+    let nearest = cur, nearestDist = cur ? angTo(cur) : Infinity;
     remaining.forEach(t => {
       if (t === cur) return;
-      const dist = Math.hypot(angDiff(t.az, this.az), t.el - this.el);
-      const margin = cur ? STICKY_MARGIN : 0;   // no hysteresis when nothing is selected yet
-      if (dist < nearestDist - margin) { nearestDist = dist; nearest = t; }
+      const d = angTo(t);
+      if (d < nearestDist - (cur ? STICKY_MARGIN : 0)) { nearestDist = d; nearest = t; }
     });
     this._target = nearest;
 
+    // 4) Project ONLY the active target through the camera → a world-locked dot
+    //    pinned to its real point on the wall (perspective, with roll handled).
+    const { thx, thy } = this._fovTan();
     const clamp = (v) => Math.max(6, Math.min(94, v));
+    const vc = this._vc || (this._vc = new THREE.Vector3());
     TARGETS.forEach(t => {
       const dot = this.dots[t.key];
       if (!dot) return;
       if (t !== nearest) { dot.style.display = 'none'; return; }   // one dot at a time
-      const x = 50 + (angDiff(t.az, this.az) / FOV) * 50;
-      const y = 50 - ((t.el - this.el) / FOV) * 50;
-      const onscreen = x > 0 && x < 100 && y > 0 && y < 100;
+      vc.copy(targetVec(t)).applyQuaternion(invQ);                 // → camera space
+      let x, y, onscreen;
+      if (vc.z < -1e-3) {                                          // in front of camera
+        const ndcX = (vc.x / -vc.z) / thx, ndcY = (vc.y / -vc.z) / thy;
+        x = 50 + ndcX * 50; y = 50 - ndcY * 50;
+        onscreen = Math.abs(ndcX) <= 1 && Math.abs(ndcY) <= 1;
+      } else {                                                     // behind → ride the edge
+        const a = Math.atan2(vc.y, vc.x);
+        x = 50 + Math.cos(a) * 60; y = 50 - Math.sin(a) * 60;
+        onscreen = false;
+      }
       dot.style.display = 'flex';
       dot.style.left = clamp(x) + '%'; dot.style.top = clamp(y) + '%';
       dot.classList.remove('done', 'pending');

@@ -126,8 +126,20 @@ def stitch_panorama(image_paths):
     feats, matches, pair_matches = _feature_diagnostics(imgs)
     debug.update(num_features=feats, num_matches=matches, pair_matches=pair_matches)
 
-    stitcher = cv2.Stitcher_create(cv2.Stitcher_PANORAMA)
-    status, pano = stitcher.stitch(imgs)
+    # Try progressively more forgiving confidence thresholds. Handheld phone
+    # captures often have uneven overlap; the default (1.0) rejects borderline
+    # pairs and fails with NEED_MORE_IMGS even when a good panorama is possible.
+    # Lowering the threshold lets more matched pairs through — the one real lever
+    # here (exposure is already block-gain and seams graph-cut by default in
+    # PANORAMA mode, so re-setting those, as some snippets suggest, is a no-op).
+    status, pano = cv2.Stitcher_ERR_NEED_MORE_IMGS, None
+    for conf in (1.0, 0.7, 0.5):
+        stitcher = cv2.Stitcher_create(cv2.Stitcher_PANORAMA)
+        stitcher.setPanoConfidenceThresh(conf)
+        status, pano = stitcher.stitch(imgs)
+        if status == cv2.Stitcher_OK and pano is not None:
+            debug["pano_confidence_thresh"] = conf
+            break
     debug["raw_status_code"] = int(status)
     if status != cv2.Stitcher_OK or pano is None:
         debug["reason"] = _STATUS_REASON.get(status, f"stitch failed (code {status})")
