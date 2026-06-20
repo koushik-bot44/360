@@ -11,6 +11,7 @@ Returns the panorama plus debugging info: images used, matched features, output
 resolution, and a clear success/failure reason.
 """
 import glob
+import os
 import shutil
 import subprocess
 import tempfile
@@ -24,6 +25,15 @@ import numpy as np
 MAX_DIM = 1600
 TARGET_WIDTH = 4096          # final equirectangular width (height = width / 2)
 HUGIN_TIMEOUT = 240          # seconds per Hugin CLI step before giving up → fallback
+
+# Where to find Hugin's CLI tools. Prefer $HUGIN_BIN; else a local app-bundle
+# install (e.g. the Hugin.app copied into the home dir on macOS). When the tools
+# live in an app bundle their dylibs sit in ../Libraries via @executable_path,
+# so calling them by full path Just Works.
+_DEFAULT_HUGIN = os.path.expanduser("~/hugin/Hugin.app/Contents/MacOS")
+HUGIN_BIN = os.environ.get("HUGIN_BIN") or (_DEFAULT_HUGIN if os.path.isdir(_DEFAULT_HUGIN) else "")
+HUGIN_TOOLS = ("pto_gen", "cpfind", "cpclean", "autooptimiser",
+               "pano_modify", "hugin_executor", "nona", "enblend")
 
 _STATUS_REASON = {
     cv2.Stitcher_OK: "ok",
@@ -109,11 +119,20 @@ def _spherical_to_equirect(pano, target_width=TARGET_WIDTH):
     return canvas, vfov, covered
 
 
+def _hugin_tool(name):
+    """Resolve a Hugin CLI tool: prefer $HUGIN_BIN / the detected app bundle,
+    then PATH. Returns an executable path or None."""
+    if HUGIN_BIN:
+        p = os.path.join(HUGIN_BIN, name)
+        if os.access(p, os.X_OK):
+            return p
+    return shutil.which(name)
+
+
 def _hugin_available():
-    """Hugin's CLI tools form the stitching pipeline. Treat it as available only
-    if the whole chain we use is on PATH (else fall back to OpenCV)."""
-    return all(shutil.which(t) for t in
-               ("pto_gen", "cpfind", "cpclean", "autooptimiser", "pano_modify", "hugin_executor"))
+    """Treat Hugin as available only if the whole chain we use resolves (else
+    fall back to OpenCV)."""
+    return all(_hugin_tool(t) for t in HUGIN_TOOLS)
 
 
 def _to_2to1(img):
@@ -146,8 +165,13 @@ def _stitch_hugin(image_paths):
     work = Path(tempfile.mkdtemp(prefix="hugin_"))
     pto = work / "project.pto"
 
+    env = dict(os.environ)
+    if HUGIN_BIN:                                   # so hugin_executor finds nona/enblend
+        env["PATH"] = HUGIN_BIN + os.pathsep + env.get("PATH", "")
+
     def run(cmd):
-        subprocess.run(cmd, cwd=work, check=True, timeout=HUGIN_TIMEOUT,
+        cmd = [_hugin_tool(cmd[0]) or cmd[0], *cmd[1:]]
+        subprocess.run(cmd, cwd=work, check=True, timeout=HUGIN_TIMEOUT, env=env,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     try:
@@ -157,8 +181,10 @@ def _stitch_hugin(image_paths):
         run(["cpclean", "-o", str(pto), str(pto)])
         # optimise positions + photometric, then force a full-sphere equirect canvas
         run(["autooptimiser", "-a", "-m", "-l", "-s", "-o", str(pto), str(pto)])
+        # projection 2 = equirectangular; full 360x180 sphere; no autocrop so the
+        # poles aren't trimmed away (omitting --crop leaves the canvas uncropped).
         run(["pano_modify", "--projection=2", "--fov=360x180",
-             "--canvas=AUTO", "--crop=NONE", "-o", str(pto), str(pto)])
+             "--canvas=AUTO", "-o", str(pto), str(pto)])
         run(["hugin_executor", "--stitching", "--prefix=pano", str(pto)])
 
         outs = sorted(glob.glob(str(work / "pano*.tif")) + glob.glob(str(work / "pano*.jpg")))
