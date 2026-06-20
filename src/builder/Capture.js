@@ -253,12 +253,21 @@ export default class Capture {
       this.crosshair.classList.remove('arming');
     }
 
-    const how = this.hasOrientation ? 'Turn' : 'Drag';
     let msg;
     if (this._walking) msg = '⚠ Stay in one spot — rotate in place, don\'t walk';
     else if (!nearest) msg = 'All captured — press Finish to stitch';
     else if (locked) msg = 'Hold steady — capturing…';
-    else msg = `${how} to bring the dot into the crosshair`;
+    else if (!this.hasOrientation) msg = 'Drag to bring the dot into the crosshair';
+    else {
+      // Which way to move, in WORLD terms (yaw/pitch vs the aim direction) so the
+      // hint stays correct even when the phone is rolled. Call out the dominant
+      // axis, like the real capture apps ("← Turn left", "↑ Tilt up").
+      const dAz = ((nearest.az - this.az + 540) % 360) - 180;   // +ve ⇒ target is to the right
+      const dEl = nearest.el - this.el;                          // +ve ⇒ target is higher
+      msg = Math.abs(dAz) >= Math.abs(dEl)
+        ? (dAz > 0 ? '→ Turn right' : '← Turn left')
+        : (dEl > 0 ? '↑ Tilt up' : '↓ Tilt down');
+    }
     $('cap-guidance').textContent = msg;
 
     $('cap-shoot').disabled = !locked;
