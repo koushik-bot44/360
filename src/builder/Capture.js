@@ -3,8 +3,8 @@
  *
  * Opens the device camera and overlays reticle dots at the yaw/pitch positions
  * still to be shot. The pattern is three rings + the two poles for full 360×180
- * coverage (no dark floor/ceiling): a middle ring (12 @ 0°), an upper ring
- * (8 @ +55°), a lower ring (8 @ −55°), and zenith/nadir — 30 targets.
+ * coverage (no dark floor/ceiling): a middle ring (8 @ 0°), an upper ring
+ * (5 @ +45°), a lower ring (5 @ −45°), and an explicit zenith/nadir — 20 targets.
  * To stay clean (like a guided street-view capture) only the NEXT target dot is
  * shown at a time; aim it into the crosshair and — once aligned and steady for a
  * moment — it AUTO-captures (no tapping). Each target is a DIRECTION on a sphere
@@ -19,13 +19,16 @@
  */
 import * as THREE from 'three';
 
-// Compact full-sphere target set (~14): middle ring + sparse upper/lower rings.
-// Fewer dots = a quicker, less cluttered capture; the wide vertical FOV of the
-// tilted rings still reaches the poles so there's (almost) no floor/ceiling cap.
+// Full-sphere target set (20): a middle ring + denser upper/lower rings + an
+// explicit zenith (straight up) and nadir (straight down). More overlap — and
+// real pole shots — give the stitcher much more to match at the ceiling/floor,
+// where sparse coverage previously left caps/seams. ~36% overlap at FOV 65.
 const TARGETS = [
   ...Array.from({ length: 8 }, (_, i) => ({ key: `m${i}`, label: `${i * 45}°`, az: i * 45, el: 0 })),
-  ...Array.from({ length: 3 }, (_, i) => ({ key: `u${i}`, label: '↑', az: i * 120 + 30, el: 50 })),
-  ...Array.from({ length: 3 }, (_, i) => ({ key: `d${i}`, label: '↓', az: i * 120 + 30, el: -50 })),
+  ...Array.from({ length: 5 }, (_, i) => ({ key: `u${i}`, label: '↑', az: i * 72 + 36, el: 45 })),
+  ...Array.from({ length: 5 }, (_, i) => ({ key: `d${i}`, label: '↓', az: i * 72, el: -45 })),
+  { key: 'zen', label: '⤒ up', az: 0, el: 85 },
+  { key: 'nad', label: '⤓ down', az: 0, el: -85 },
 ];
 
 const MIN_SHOTS = 8;       // the middle ring alone already gives a usable panorama
