@@ -10,3 +10,8 @@ if (document.readyState === 'loading') {
 } else {
   boot();
 }
+
+// Register the service worker → installable PWA + offline app shell on the phone.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
