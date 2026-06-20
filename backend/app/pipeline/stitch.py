@@ -10,6 +10,10 @@ the same code path handles both (caps shrink to nothing as vertical coverage gro
 Returns the panorama plus debugging info: images used, matched features, output
 resolution, and a clear success/failure reason.
 """
+import glob
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import cv2
@@ -19,6 +23,7 @@ import numpy as np
 # phone photos are far larger than we need for a web panorama.
 MAX_DIM = 1600
 TARGET_WIDTH = 4096          # final equirectangular width (height = width / 2)
+HUGIN_TIMEOUT = 240          # seconds per Hugin CLI step before giving up → fallback
 
 _STATUS_REASON = {
     cv2.Stitcher_OK: "ok",
@@ -104,6 +109,76 @@ def _spherical_to_equirect(pano, target_width=TARGET_WIDTH):
     return canvas, vfov, covered
 
 
+def _hugin_available():
+    """Hugin's CLI tools form the stitching pipeline. Treat it as available only
+    if the whole chain we use is on PATH (else fall back to OpenCV)."""
+    return all(shutil.which(t) for t in
+               ("pto_gen", "cpfind", "cpclean", "autooptimiser", "pano_modify", "hugin_executor"))
+
+
+def _to_2to1(img):
+    """Normalise a panorama to a 2:1 equirectangular canvas (pad short poles,
+    centre-crop if over-tall, cap width to TARGET_WIDTH)."""
+    if img is None:
+        return None
+    if img.ndim == 3 and img.shape[2] == 4:        # drop alpha from Hugin TIFFs
+        img = img[:, :, :3]
+    h, w = img.shape[:2]
+    target_h = w // 2
+    if h > target_h:
+        y0 = (h - target_h) // 2
+        canvas = img[y0:y0 + target_h]
+    elif h < target_h:
+        canvas = np.full((target_h, w, 3), 16, np.uint8)
+        y0 = (target_h - h) // 2
+        canvas[y0:y0 + h] = img
+    else:
+        canvas = img
+    if canvas.shape[1] > TARGET_WIDTH:
+        canvas = cv2.resize(canvas, (TARGET_WIDTH, TARGET_WIDTH // 2), interpolation=cv2.INTER_AREA)
+    return canvas
+
+
+def _stitch_hugin(image_paths):
+    """Stitch with Hugin's CLI (cpfind/autooptimiser/nona/enblend) into a full
+    360x180 equirectangular. Much stronger at poles/seams than OpenCV's Stitcher.
+    Returns (equirect BGR or None, reason). Any failure → None so we fall back."""
+    work = Path(tempfile.mkdtemp(prefix="hugin_"))
+    pto = work / "project.pto"
+
+    def run(cmd):
+        subprocess.run(cmd, cwd=work, check=True, timeout=HUGIN_TIMEOUT,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    try:
+        run(["pto_gen", "-o", str(pto), *[str(p) for p in image_paths]])
+        # control points (multirow handles ring captures; celeste drops sky points)
+        run(["cpfind", "--multirow", "--celeste", "-o", str(pto), str(pto)])
+        run(["cpclean", "-o", str(pto), str(pto)])
+        # optimise positions + photometric, then force a full-sphere equirect canvas
+        run(["autooptimiser", "-a", "-m", "-l", "-s", "-o", str(pto), str(pto)])
+        run(["pano_modify", "--projection=2", "--fov=360x180",
+             "--canvas=AUTO", "--crop=NONE", "-o", str(pto), str(pto)])
+        run(["hugin_executor", "--stitching", "--prefix=pano", str(pto)])
+
+        outs = sorted(glob.glob(str(work / "pano*.tif")) + glob.glob(str(work / "pano*.jpg")))
+        if not outs:
+            return None, "hugin produced no output"
+        img = cv2.imread(outs[0], cv2.IMREAD_COLOR)
+        if img is None:
+            return None, "hugin output unreadable"
+        return _to_2to1(img), "ok"
+    except subprocess.TimeoutExpired:
+        return None, "hugin timed out"
+    except subprocess.CalledProcessError as e:
+        msg = (e.stderr or b"").decode("utf-8", "ignore").strip().splitlines()
+        return None, f"hugin step failed: {msg[-1] if msg else e}"
+    except Exception as e:                              # never let Hugin crash the request
+        return None, f"hugin error: {e}"
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def stitch_panorama(image_paths):
     """Stitch photos -> (equirect BGR image or None, debug dict)."""
     imgs, names = _load(image_paths)
@@ -126,16 +201,29 @@ def stitch_panorama(image_paths):
     feats, matches, pair_matches = _feature_diagnostics(imgs)
     debug.update(num_features=feats, num_matches=matches, pair_matches=pair_matches)
 
-    # Try progressively more forgiving confidence thresholds. Handheld phone
-    # captures often have uneven overlap; the default (1.0) rejects borderline
-    # pairs and fails with NEED_MORE_IMGS even when a good panorama is possible.
-    # Lowering the threshold lets more matched pairs through — the one real lever
-    # here (exposure is already block-gain and seams graph-cut by default in
-    # PANORAMA mode, so re-setting those, as some snippets suggest, is a no-op).
+    # Prefer Hugin when installed — it's much stronger on full-sphere poles/seams.
+    # Falls back to OpenCV automatically if Hugin isn't on PATH or fails.
+    if _hugin_available():
+        hpano, hreason = _stitch_hugin(image_paths)
+        if hpano is not None:
+            debug.update(engine="hugin", status="ok", reason="ok",
+                         output_resolution=[int(hpano.shape[1]), int(hpano.shape[0])],
+                         vertical_fov_deg=180.0)
+            return hpano, debug
+        debug["hugin_reason"] = hreason          # record why we fell back to OpenCV
+
+    # OpenCV fallback. Try progressively more forgiving confidence thresholds:
+    # handheld captures have uneven overlap, and the default (1.0) rejects
+    # borderline pairs and fails with NEED_MORE_IMGS even when a good panorama is
+    # possible. A higher registration resolution gives the feature matcher more
+    # pixels → better alignment on weak overlap (exposure is already block-gain
+    # and seams graph-cut by default in PANORAMA mode, so re-setting those — as
+    # some snippets suggest — is a no-op, and the methods don't even exist here).
     status, pano = cv2.Stitcher_ERR_NEED_MORE_IMGS, None
     for conf in (1.0, 0.7, 0.5):
         stitcher = cv2.Stitcher_create(cv2.Stitcher_PANORAMA)
         stitcher.setPanoConfidenceThresh(conf)
+        stitcher.setRegistrationResol(0.8)       # default 0.6 → better control points
         status, pano = stitcher.stitch(imgs)
         if status == cv2.Stitcher_OK and pano is not None:
             debug["pano_confidence_thresh"] = conf
