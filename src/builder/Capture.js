@@ -30,7 +30,7 @@ const FOV = 65;            // assumed phone h-fov for projecting dots
 const LOCK_ANGLE = 12;     // deg crosshair must be within target to lock
 const BLUR_MIN = 55;       // laplacian-variance threshold
 const WALK_ACCEL = 2.2;    // m/s² (gravity-excluded) sustained ⇒ "you're walking"
-const SMOOTH = 0.2;        // orientation low-pass factor (anti-jitter)
+const STICKY_MARGIN = 18;  // deg another target must beat the current one by to take over
 const AUTO_MS = 650;       // hold aligned this long → auto-capture (hands-free)
 
 const $ = (id) => document.getElementById(id);
@@ -92,10 +92,14 @@ export default class Capture {
       const tAz = (360 - e.alpha) % 360;                         // target yaw
       const tEl = Math.max(-90, Math.min(90, (e.beta || 90) - 90)); // target pitch
       if (!this.hasOrientation) { this.az = tAz; this.el = tEl; } // snap on first reading
-      else {                                                      // low-pass smoothing → no jitter
+      else {
+        // Adaptive low-pass (1€-filter style): a flat factor can't tell a real
+        // turn from compass micro-jitter. _gain() returns ~0 for tiny wobble
+        // (dot holds still) but rises for genuine motion (dot still tracks).
         let d = ((tAz - this.az + 540) % 360) - 180;
-        this.az = (this.az + d * SMOOTH + 360) % 360;
-        this.el += (tEl - this.el) * SMOOTH;
+        this.az = (this.az + d * this._gain(Math.abs(d)) + 360) % 360;
+        const de = tEl - this.el;
+        this.el += de * this._gain(Math.abs(de));
       }
       this.hasOrientation = true;
     };
@@ -119,6 +123,15 @@ export default class Capture {
     setTimeout(() => { this.manual = !this.hasOrientation; this.root.classList.toggle('manual-mode', this.manual); }, 700);
   }
 
+  // deg-of-change-per-event → smoothing weight. A deadband kills sensor jitter
+  // when you're holding still; the weight ramps up so fast turns still track.
+  _gain(speed) {
+    if (speed < 0.6) return 0;     // deadband: ignore micro-jitter entirely
+    if (speed < 3)   return 0.12;
+    if (speed < 10)  return 0.3;
+    return 0.5;
+  }
+
   // ---------- render loop ----------
   _loop() {
     this.raf = requestAnimationFrame(() => this._loop());
@@ -128,12 +141,19 @@ export default class Capture {
     $('cap-progress').textContent = `${done}/${TARGETS.length}`;
     this.needle.style.transform = `rotate(${this.az}deg)`;
 
-    // the single next target (nearest uncaptured) — we show ONLY this one to
-    // keep the screen clean, like a guided street-view capture.
-    let nearest = null, nearestDist = Infinity;
+    // The single next target — we show ONLY this one to keep the screen clean.
+    // It's STICKY: keep the current target until it's captured, and switch to
+    // another only when that other is clearly (STICKY_MARGIN°) closer. Without
+    // this, two near-equidistant targets flip back and forth on every wobble of
+    // the compass, so a different dot flashes each frame ("too many dots").
+    let cur = (this._target && !this.captured[this._target.key]) ? this._target : null;
+    let nearest = cur;
+    let nearestDist = cur ? Math.hypot(angDiff(cur.az, this.az), cur.el - this.el) : Infinity;
     remaining.forEach(t => {
+      if (t === cur) return;
       const dist = Math.hypot(angDiff(t.az, this.az), t.el - this.el);
-      if (dist < nearestDist) { nearestDist = dist; nearest = t; }
+      const margin = cur ? STICKY_MARGIN : 0;   // no hysteresis when nothing is selected yet
+      if (dist < nearestDist - margin) { nearestDist = dist; nearest = t; }
     });
     this._target = nearest;
 
