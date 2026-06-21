@@ -251,15 +251,6 @@ def parse_orientation(name):
     return (float(yaw), float(pit))
 
 
-def _wrap_blur(img, sigma):
-    """Gaussian blur that wraps horizontally (the equirect's 360° seam) so the
-    left/right join blends like every other seam; vertical uses reflect."""
-    pad = max(1, int(sigma * 3))
-    padded = np.concatenate([img[:, -pad:], img, img[:, :pad]], axis=1)
-    b = cv2.GaussianBlur(padded, (0, 0), sigmaX=sigma, sigmaY=sigma, borderType=cv2.BORDER_REFLECT)
-    return b[:, pad:pad + img.shape[1]]
-
-
 def _stitch_oriented(image_paths, orientations, width=TARGET_WIDTH):
     """Orientation-based stitch: project each photo onto the equirectangular
     sphere at the angle it was SHOT (yaw/pitch from capture) and feather-blend.
@@ -274,17 +265,12 @@ def _stitch_oriented(image_paths, orientations, width=TARGET_WIDTH):
     cl = np.cos(lat)
     dirs = np.stack([cl * np.sin(lon), np.sin(lat), -cl * np.cos(lon)], axis=-1)
 
-    # Two accumulators per pixel:
-    #  (1) winner-take-all → crisp DETAIL: each pixel from the single most-centred
-    #      photo, so overlaps are never averaged → no ghost-doubling.
-    #  (2) a feathered average → smooth BRIGHTNESS across overlaps.
-    # We then multi-band blend: keep the HIGH frequencies of (1) and the LOW
-    # frequencies of (2). Detail stays sharp; the exposure jumps at the seams are
-    # low-frequency, so they melt into a smooth gradient and the seams disappear.
-    sharp = np.full((H, W, 3), 16.0, np.float32)
+    # Winner-take-all seam compositing: each output pixel is taken from the SINGLE
+    # photo most centered on that direction, so two overlapping photos are never
+    # averaged together — that averaging is what doubled objects into "ghosts".
+    # Seams fall midway between neighbouring shots, like tiling each side.
+    out = np.full((H, W, 3), 16.0, np.float32)
     best = np.full((H, W), -1.0, np.float32)
-    acc = np.zeros((H, W, 3), np.float32)
-    wsum = np.zeros((H, W), np.float32)
     placed = 0
     for path, ori in zip(image_paths, orientations):
         if ori is None:
@@ -317,27 +303,17 @@ def _stitch_oriented(image_paths, orientations, width=TARGET_WIDTH):
         inside = front & (np.abs(nx) <= 1) & (np.abs(ny) <= 1)
         mx = ((nx + 1) / 2 * (pw - 1)).astype(np.float32)
         my = ((1 - (ny + 1) / 2) * (ph - 1)).astype(np.float32)
-        warped = cv2.remap(img, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT).astype(np.float32)
-        center = np.clip(1 - np.maximum(np.abs(nx), np.abs(ny)), 0, 1)
-        # (1) winner-take-all on centeredness
-        weight = np.where(inside, center, -1.0)
+        warped = cv2.remap(img, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        # centeredness: 1 at the photo's centre, 0 at its frame edge. The pixel is
+        # claimed by whichever photo is most centred on it (no averaging).
+        weight = np.where(inside, np.clip(1 - np.maximum(np.abs(nx), np.abs(ny)), 0, 1), -1.0)
         take = weight > best
-        sharp[take] = warped[take]
+        out[take] = warped[take]
         best[take] = weight[take]
-        # (2) feathered average (wide overlap) for smooth brightness
-        wf = (np.where(inside, center, 0.0) ** 2).astype(np.float32)
-        acc += warped * wf[..., None]
-        wsum += wf
         placed += 1
 
     if placed < 2:
         return None, placed
-
-    covered = best >= 0
-    smooth = np.where(wsum[..., None] > 1e-6, acc / np.maximum(wsum[..., None], 1e-6), sharp)
-    sigma = W / 120.0                                   # low-band width (~seam scale)
-    blended = sharp + (_wrap_blur(smooth, sigma) - _wrap_blur(sharp, sigma))
-    out = np.where(covered[..., None], np.clip(blended, 0, 255), 16.0)
     return out.astype(np.uint8), placed
 
 
