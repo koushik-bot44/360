@@ -42,7 +42,7 @@ const ROLL_MAX = 10;       // deg of phone roll allowed before we refuse to capt
 const BLUR_MIN = 55;       // laplacian-variance threshold
 const WALK_ACCEL = 2.2;    // m/s² (gravity-excluded) sustained ⇒ "you're walking"
 const STICKY_MARGIN = 18;  // deg another target must beat the current one by to take over
-const AUTO_MS = 650;       // hold aligned this long → auto-capture (hands-free)
+const AUTO_MS = 900;       // hold aligned & still this long → auto-capture (sharper)
 const Q_SMOOTH = 0.35;     // orientation slerp per frame — light, so it stays responsive
 const DEG = Math.PI / 180;
 
@@ -263,19 +263,23 @@ export default class Capture {
     this.box.classList.toggle('tilt', !!(aimed && !level));
     if (nearest && this.dots[nearest.key]) this.dots[nearest.key].classList.toggle('aligned', !!locked);
 
-    // hands-free auto-capture: hold aligned & steady for AUTO_MS → snap
+    // hands-free auto-capture: hold aligned & STILL for AUTO_MS → snap. The hold
+    // ring fills as you hold so you know to stay steady (sharper, less blur).
     if (locked) {
       if (!this._lockStart) this._lockStart = now;
-      this.crosshair.classList.add('arming');
+      const p = Math.min(100, ((now - this._lockStart) / AUTO_MS) * 100);
+      this.hold.classList.add('active');
+      this.hold.style.setProperty('--p', p.toFixed(0));
       if (now - this._lockStart > AUTO_MS && !this._autoBusy) {
         this._autoBusy = true;
         this.shoot();                 // captures _target (blur-checked inside)
         this._autoBusy = false;
         this._lockStart = 0;
+        this._flash();                // brief flash = shot taken
       }
     } else {
       this._lockStart = 0;
-      this.crosshair.classList.remove('arming');
+      this.hold.classList.remove('active');
     }
 
     let msg;
@@ -406,6 +410,7 @@ export default class Capture {
     this.level = $('cap-level');
     this.needle = $('cap-needle');
     this.dotsLayer = $('cap-dots');
+    this.hold = $('cap-hold');
     this.dots = {};
     $('cap-shoot').addEventListener('click', () => this.shoot());
     $('cap-close').addEventListener('click', () => this.close());
@@ -424,6 +429,11 @@ export default class Capture {
       this._drag = { x: e.clientX, y: e.clientY };
     });
     window.addEventListener('pointerup', () => { this._drag = null; });
+  }
+
+  _flash() {
+    this.root.classList.add('cap-flash');
+    setTimeout(() => this.root.classList.remove('cap-flash'), 160);
   }
 
   _toast(msg, warn) {
