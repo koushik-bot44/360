@@ -476,12 +476,11 @@ export default class Builder {
     const scene = this.store.getScene(sceneId);
     if (!scene) return;
     this.currentSceneId = sceneId;
-    const c = $('pano-canvas');
-    c.style.transition = 'opacity .35s'; c.style.opacity = '0.15';
-    this.viewer.loadPanorama(scene.image).then(() => {
+    // hide the old room's hotspots during the crossfade, then show the new ones
+    this.viewer.setHotspots([]);
+    this.viewer.loadPanoramaSmooth(scene.image).then(() => {
       // only show hotspots that actually lead somewhere
       this.viewer.setHotspots(scene.hotspots.filter(h => h.target));
-      c.style.opacity = '1';
       $('play-scene-name').textContent = `${scene.name} · ${scene.floor}`;
     });
     this._renderPlayFloors();

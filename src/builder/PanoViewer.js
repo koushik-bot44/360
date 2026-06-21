@@ -156,6 +156,40 @@ export default class PanoViewer {
     });
   }
 
+  // Crossfade to a new panorama with a subtle forward "punch" — moving between
+  // rooms feels like gliding forward (Street View), not an instant cut.
+  loadPanoramaSmooth(url, duration = 480) {
+    return new Promise((resolve) => {
+      new THREE.TextureLoader().load(url, (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        if (!this.sphereMat.map) {                 // first load → no transition
+          this.sphereMat.map = tex; this.sphereMat.color.set(0xffffff);
+          this.sphereMat.needsUpdate = true; resolve(); return;
+        }
+        // a second inverted sphere, just inside the first, fades in over it
+        const geo = new THREE.SphereGeometry(SPHERE_R - 2, 60, 40);
+        geo.scale(-1, 1, 1);
+        const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false });
+        const overlay = new THREE.Mesh(geo, mat);
+        this.scene.add(overlay);
+        const fov0 = this.camera.fov;
+        const start = performance.now();
+        const tick = () => {
+          const t = Math.min(1, (performance.now() - start) / duration);
+          mat.opacity = t * t * (3 - 2 * t);                       // smoothstep fade
+          this.camera.fov = fov0 - Math.sin(t * Math.PI) * 6;      // forward punch
+          this.camera.updateProjectionMatrix();
+          if (t < 1) { requestAnimationFrame(tick); return; }
+          this.sphereMat.map = tex; this.sphereMat.color.set(0xffffff); this.sphereMat.needsUpdate = true;
+          this.scene.remove(overlay); geo.dispose(); mat.dispose();
+          this.camera.fov = fov0; this.camera.updateProjectionMatrix();
+          resolve();
+        };
+        requestAnimationFrame(tick);
+      }, undefined, () => resolve());
+    });
+  }
+
   clearHotspots() {
     this.markers.forEach(m => this.hotspotGroup.remove(m.mesh));
     this.markers = [];
