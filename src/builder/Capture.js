@@ -26,15 +26,19 @@ import * as THREE from 'three';
 // collapsed. 30° spacing gives ~40% overlap → the stitcher can lock the loop.
 const TARGETS = [
   ...Array.from({ length: 12 }, (_, i) => ({ key: `m${i}`, label: `${i * 30}°`, az: i * 30, el: 0 })),
-  ...Array.from({ length: 6 }, (_, i) => ({ key: `u${i}`, label: '↑', az: i * 60 + 30, el: 45 })),
-  ...Array.from({ length: 6 }, (_, i) => ({ key: `d${i}`, label: '↓', az: i * 60, el: -45 })),
-  { key: 'zen', label: '⤒ up', az: 0, el: 85 },
-  { key: 'nad', label: '⤓ down', az: 0, el: -85 },
+  ...Array.from({ length: 8 }, (_, i) => ({ key: `u${i}`, label: '↑', az: i * 45 + 22, el: 45 })),
+  ...Array.from({ length: 8 }, (_, i) => ({ key: `d${i}`, label: '↓', az: i * 45, el: -45 })),
+  { key: 'zen0', label: '⤒ up', az: 0, el: 87 },
+  { key: 'zen1', label: '⤒ up', az: 180, el: 87 },
+  { key: 'nad0', label: '⤓ down', az: 0, el: -87 },
+  { key: 'nad1', label: '⤓ down', az: 180, el: -87 },
 ];
 
 const MIN_SHOTS = 8;       // the middle ring alone already gives a usable panorama
 const FOV = 65;            // assumed phone horizontal FOV (deg) for projecting dots
 const LOCK_ANGLE = 12;     // deg between aim and target to lock
+const ROLL_MAX = 10;       // deg of phone roll allowed before we refuse to capture
+                           // (level shots stitch far better — like the real app)
 const BLUR_MIN = 55;       // laplacian-variance threshold
 const WALK_ACCEL = 2.2;    // m/s² (gravity-excluded) sustained ⇒ "you're walking"
 const STICKY_MARGIN = 18;  // deg another target must beat the current one by to take over
@@ -197,6 +201,13 @@ export default class Capture {
     this.needle.style.transform = `rotate(${this.az}deg)`;
     const invQ = (this._invQ || (this._invQ = new THREE.Quaternion())).copy(this._q).invert();
 
+    // Phone roll (0 = level): the camera's right vector lifts off horizontal when
+    // you tilt the phone left/right. Like the real app, we refuse to capture a
+    // tilted frame — level shots stitch far better. Roll is ill-defined when
+    // aiming near the poles, so the pole shots are exempt.
+    const rightV = (this._rightV || (this._rightV = new THREE.Vector3())).set(1, 0, 0).applyQuaternion(this._q);
+    const roll = Math.asin(Math.max(-1, Math.min(1, rightV.y))) / DEG;
+
     // 3) Next target — STICKY, by TRUE angular distance between aim and target:
     //    keep the current one until it's captured, switching only when another
     //    is clearly (STICKY_MARGIN°) closer, so the dot never flickers between
@@ -238,9 +249,12 @@ export default class Capture {
       dot.classList.toggle('edge', !onscreen);                     // riding the edge = "turn this way"
     });
 
-    const locked = nearest && nearestDist < LOCK_ANGLE && !this._walking;
+    const level = Math.abs(this.el) > 65 || Math.abs(roll) < ROLL_MAX;  // poles exempt
+    const aimed = nearest && nearestDist < LOCK_ANGLE && !this._walking;
+    const locked = aimed && level;
     this.crosshair.classList.toggle('locked', !!locked);
     this.crosshair.classList.toggle('warn', !!this._walking);
+    this.crosshair.classList.toggle('tilt', !!(aimed && !level));
 
     // hands-free auto-capture: hold aligned & steady for AUTO_MS → snap
     if (locked) {
@@ -261,6 +275,7 @@ export default class Capture {
     if (this._walking) msg = '⚠ Stay in one spot — rotate in place, don\'t walk';
     else if (!nearest) msg = 'All captured — press Finish to stitch';
     else if (locked) msg = 'Hold steady — capturing…';
+    else if (aimed && !level) msg = roll > 0 ? '↺ Straighten up — tilting right' : '↻ Straighten up — tilting left';
     else if (!this.hasOrientation) msg = 'Drag to bring the dot into the crosshair';
     else {
       // Which way to move, in WORLD terms (yaw/pitch vs the aim direction) so the
