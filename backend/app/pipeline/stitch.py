@@ -11,7 +11,9 @@ Returns the panorama plus debugging info: images used, matched features, output
 resolution, and a clear success/failure reason.
 """
 import glob
+import math
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -24,6 +26,7 @@ import numpy as np
 # phone photos are far larger than we need for a web panorama.
 MAX_DIM = 1600
 TARGET_WIDTH = 4096          # final equirectangular width (height = width / 2)
+FOV = 65.0                   # assumed phone horizontal FOV (deg) for orientation-based stitch
 HUGIN_TIMEOUT = 240          # seconds per Hugin CLI step before giving up → fallback
 
 # Where to find Hugin's CLI tools. Prefer $HUGIN_BIN; else a local app-bundle
@@ -237,7 +240,79 @@ def _stitch_openstitching(image_paths):
         return None, f"{type(e).__name__}: {e}".strip()[:200]
 
 
-def stitch_panorama(image_paths):
+def parse_orientation(name):
+    """Guided-capture frames are named y{p|m}NNN_p{p|m}NNN.jpg, encoding the
+    yaw/pitch the shot was taken at. Returns (az_deg, el_deg) or None."""
+    m = re.match(r"y([pm])(\d+)_p([pm])(\d+)", Path(name).stem)
+    if not m:
+        return None
+    yaw = int(m.group(2)) * (-1 if m.group(1) == "m" else 1)
+    pit = int(m.group(4)) * (-1 if m.group(3) == "m" else 1)
+    return (float(yaw), float(pit))
+
+
+def _stitch_oriented(image_paths, orientations, width=TARGET_WIDTH):
+    """Orientation-based stitch: project each photo onto the equirectangular
+    sphere at the angle it was SHOT (yaw/pitch from capture) and feather-blend.
+    Positions are known, not solved — so it never funnels and always fills the
+    sphere, at the cost of some softness where overlaps don't perfectly align.
+    Returns (equirect BGR or None, num_placed)."""
+    W = width
+    H = width // 2
+    lon = (np.arange(W) + 0.5) / W * 2 * math.pi - math.pi
+    lat = math.pi / 2 - (np.arange(H) + 0.5) / H * math.pi
+    lon, lat = np.meshgrid(lon, lat)
+    cl = np.cos(lat)
+    dirs = np.stack([cl * np.sin(lon), np.sin(lat), -cl * np.cos(lon)], axis=-1)
+
+    acc = np.zeros((H, W, 3), np.float32)
+    wsum = np.zeros((H, W), np.float32)
+    placed = 0
+    for path, ori in zip(image_paths, orientations):
+        if ori is None:
+            continue
+        img = cv2.imread(str(path))
+        if img is None:
+            continue
+        az, el = ori[0] * (math.pi / 180), ori[1] * (math.pi / 180)
+        ce = math.cos(el)
+        f = np.array([ce * math.sin(az), math.sin(el), -ce * math.cos(az)])
+        up = np.array([0.0, 1.0, 0.0])
+        r = np.cross(f, up)
+        nr = np.linalg.norm(r)
+        if nr < 1e-6:                                   # looking straight up/down
+            up = np.array([0.0, 0.0, 1.0])
+            r = np.cross(f, up)
+            nr = np.linalg.norm(r)
+        r /= nr
+        uc = np.cross(r, f)
+        R = np.stack([r, uc, -f], axis=1)               # world-from-camera
+        ph, pw = img.shape[:2]
+        thx = math.tan(FOV * (math.pi / 180) / 2)
+        thy = thx * ph / pw
+        dcam = dirs @ R                                  # = R^T · dir = camera-space dir
+        dz = dcam[..., 2]
+        front = dz < -1e-6
+        safe = np.where(front, -dz, 1.0)
+        nx = (dcam[..., 0] / safe) / thx
+        ny = (dcam[..., 1] / safe) / thy
+        inside = front & (np.abs(nx) <= 1) & (np.abs(ny) <= 1)
+        mx = ((nx + 1) / 2 * (pw - 1)).astype(np.float32)
+        my = ((1 - (ny + 1) / 2) * (ph - 1)).astype(np.float32)
+        warped = cv2.remap(img, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        feather = np.clip(1 - np.maximum(np.abs(nx), np.abs(ny)), 0, 1) ** 4
+        w = (feather * inside).astype(np.float32)
+        acc += warped.astype(np.float32) * w[..., None]
+        wsum += w
+        placed += 1
+
+    if placed < 2:
+        return None, placed
+    out = np.where(wsum[..., None] > 1e-6, acc / np.maximum(wsum[..., None], 1e-6), 16).astype(np.uint8)
+    return out, placed
+
+
+def stitch_panorama(image_paths, orientations=None):
     """Stitch photos -> (equirect BGR image or None, debug dict)."""
     imgs, names = _load(image_paths)
     debug = {
@@ -258,6 +333,19 @@ def stitch_panorama(image_paths):
 
     feats, matches, pair_matches = _feature_diagnostics(imgs)
     debug.update(num_features=feats, num_matches=matches, pair_matches=pair_matches)
+
+    # Orientation-based stitch FIRST when the shots carry their capture angles
+    # (guided capture): place each photo where it was shot → always a complete
+    # sphere, no funnel, no black. Feature stitchers below need overlap and can
+    # leave the low-texture floor black; this can't, because positions are known.
+    if orientations and sum(o is not None for o in orientations) >= max(2, int(len(image_paths) * 0.6)):
+        oimg, placed = _stitch_oriented(image_paths, orientations)
+        if oimg is not None:
+            debug.update(engine="oriented", status="ok", reason="ok",
+                         num_images_used=placed, vertical_fov_deg=180.0,
+                         output_resolution=[int(oimg.shape[1]), int(oimg.shape[0])])
+            return oimg, debug
+        debug["oriented_reason"] = f"only {placed} placeable"
 
     # Prefer Hugin when installed — it's much stronger on full-sphere poles/seams.
     # Falls back to OpenCV automatically if Hugin isn't on PATH or fails.

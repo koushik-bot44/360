@@ -26,7 +26,7 @@ from . import db
 from .schemas import JobCreate, JobStatus, JobList
 from .pipeline.reconstruct import run_job
 from .pipeline import colmap_runner
-from .pipeline.stitch import stitch_panorama
+from .pipeline.stitch import stitch_panorama, parse_orientation
 from .pipeline.link import link_panos
 
 import numpy as np
@@ -71,6 +71,7 @@ async def panorama(files: list[UploadFile] = File(...)):
     tmp = Path(tempfile.mkdtemp(prefix="pano_"))
     try:
         paths = []
+        orientations = []                       # per-photo capture angle (guided capture)
         for i, f in enumerate(files):
             data = await f.read()
             if not data:
@@ -79,19 +80,22 @@ async def panorama(files: list[UploadFile] = File(...)):
             p = tmp / f"{i:03d}{ext}"
             p.write_bytes(data)
             paths.append(p)
+            orientations.append(parse_orientation(f.filename or ""))
 
-        # Keep the last capture's input photos for debugging stitch failures.
+        # Keep the last capture's input photos for debugging — preserve the
+        # original angle-encoded filename when present so it can be re-stitched.
         try:
             cap_dir = DATA.parent / "last_capture"
             if cap_dir.exists():
                 shutil.rmtree(cap_dir, ignore_errors=True)
             cap_dir.mkdir(parents=True, exist_ok=True)
-            for p in paths:
-                shutil.copy2(p, cap_dir / p.name)
+            for f, p in zip(files, paths):
+                name = Path(f.filename or "").name or p.name
+                shutil.copy2(p, cap_dir / name)
         except Exception:
             pass
 
-        equirect, debug = stitch_panorama(paths)
+        equirect, debug = stitch_panorama(paths, orientations=orientations)
         # Coverage: how much of the 2:1 sphere actually has imagery (not the black
         # pad). Low coverage ⇒ the capture didn't span the full sphere — the real
         # cause of "bad stitching" far more often than the stitch algorithm.
