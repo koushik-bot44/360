@@ -109,29 +109,60 @@ export default class PanoViewer {
 
   _bind() {
     const el = this.canvas;
+    this._ptrs = new Map();             // active pointers (for pinch-zoom)
+    this._vlon = 0; this._vlat = 0;     // drag-release momentum
+    this._pinchD = 0;
+
     el.addEventListener('pointerdown', (e) => {
+      this._ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       this._isDown = true; this._moved = false;
       this._px = e.clientX; this._py = e.clientY;
       this._downX = e.clientX; this._downY = e.clientY;
+      this._vlon = 0; this._vlat = 0;            // a new touch stops the glide
+      if (this._ptrs.size === 2) this._pinchD = this._twoDist();
     });
     window.addEventListener('pointermove', (e) => {
-      if (!this._isDown) return;
-      const dx = e.clientX - this._px;
-      const dy = e.clientY - this._py;
+      if (!this._ptrs.has(e.pointerId)) return;
+      this._ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this._ptrs.size >= 2) {                // pinch-to-zoom
+        const d = this._twoDist();
+        if (this._pinchD > 0) {
+          this.camera.fov = Math.max(30, Math.min(100, this.camera.fov * (this._pinchD / d)));
+          this.camera.updateProjectionMatrix();
+        }
+        this._pinchD = d; this._moved = true;
+        return;
+      }
+      const dx = e.clientX - this._px, dy = e.clientY - this._py;
       if (Math.abs(e.clientX - this._downX) + Math.abs(e.clientY - this._downY) > 4) this._moved = true;
-      this.lon -= dx * 0.22;
-      this.lat = Math.max(-85, Math.min(85, this.lat + dy * 0.22));
+      const k = this.camera.fov / 75;            // zoom-aware sensitivity
+      this._vlon = -dx * 0.22 * k; this._vlat = dy * 0.22 * k;
+      this.lon += this._vlon;
+      this.lat = Math.max(-85, Math.min(85, this.lat + this._vlat));
       this._px = e.clientX; this._py = e.clientY;
     });
-    window.addEventListener('pointerup', (e) => {
-      if (this._isDown && !this._moved) this._handleClick(e);
-      this._isDown = false;
-    });
+    const end = (e) => {
+      this._ptrs.delete(e.pointerId);
+      if (this._ptrs.size < 2) this._pinchD = 0;
+      if (this._ptrs.size === 0) {
+        if (this._isDown && !this._moved) this._handleClick(e);
+        this._isDown = false;
+      } else {                                   // a finger lifted from a pinch → resume drag cleanly
+        const p = [...this._ptrs.values()][0]; this._px = p.x; this._py = p.y;
+      }
+    };
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
     el.addEventListener('wheel', (e) => {
       e.preventDefault();
-      this.camera.fov = Math.max(35, Math.min(95, this.camera.fov + e.deltaY * 0.04));
+      this.camera.fov = Math.max(30, Math.min(100, this.camera.fov + e.deltaY * 0.04));
       this.camera.updateProjectionMatrix();
     }, { passive: false });
+  }
+
+  _twoDist() {
+    const p = [...this._ptrs.values()];
+    return Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
   }
 
   _pointerNDC(e) {
@@ -283,6 +314,13 @@ export default class PanoViewer {
   toggleAutoplay() { this._autoplay = !this._autoplay; return this._autoplay; }
 
   _loop() {
+    // drag-release momentum: keep gliding and ease to a stop (premium feel)
+    if (!this._isDown && !this._gyro && !this._autoplay &&
+        (Math.abs(this._vlon) > 0.012 || Math.abs(this._vlat) > 0.012)) {
+      this.lon += this._vlon;
+      this.lat = Math.max(-85, Math.min(85, this.lat + this._vlat));
+      this._vlon *= 0.92; this._vlat *= 0.92;
+    }
     // auto-spin slowly (disabled while dragging or in gyro mode)
     if (this._autoplay && !this._gyro && !this._isDown) this.lon -= 0.08;
     if (this._gyro && this._gyroDev) {
