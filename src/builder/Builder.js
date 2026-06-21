@@ -196,8 +196,15 @@ export default class Builder {
     this.selectScene(scene.id);          // opens it in the sphere viewer
     this._emptyHint(false);
     const [w, h] = data.output_resolution || [];
-    show(`✓ “${name}” added — ${data.num_images_used} photos, ${data.num_matches} matched features, ${w}×${h}px (vertical FOV ~${data.vertical_fov_deg}°). Drag to look around.`);
-    setTimeout(() => note.classList.add('hidden'), 9000);
+    const cov = data.coverage_pct;
+    // Coverage is the real quality signal: a low number means much of the sphere
+    // is black because it wasn't photographed — recapture, don't blame the stitch.
+    const low = cov != null && cov < 60;
+    const covMsg = low
+      ? ` ⚠ Only ${cov}% of the sphere was captured — turn a full 360° and look up/down for a complete result.`
+      : (cov != null ? ` ${cov}% sphere coverage.` : '');
+    show(`✓ “${name}” added — ${data.num_images_used} photos, ${data.num_matches} matched features, ${w}×${h}px.${covMsg} Drag to look around.`);
+    setTimeout(() => note.classList.add('hidden'), low ? 14000 : 9000);
   }
 
   _onStitchPhotos(files) {

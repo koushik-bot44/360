@@ -92,9 +92,16 @@ async def panorama(files: list[UploadFile] = File(...)):
             pass
 
         equirect, debug = stitch_panorama(paths)
+        # Coverage: how much of the 2:1 sphere actually has imagery (not the black
+        # pad). Low coverage ⇒ the capture didn't span the full sphere — the real
+        # cause of "bad stitching" far more often than the stitch algorithm.
+        if equirect is not None:
+            g = cv2.cvtColor(equirect, cv2.COLOR_BGR2GRAY)
+            debug["coverage_pct"] = round(float((g > 24).mean()) * 100, 1)
         print(
             f"[panorama] in={debug.get('num_images_input')} used={debug.get('num_images_used')} "
             f"matches={debug.get('num_matches')} engine={debug.get('engine')} "
+            f"coverage={debug.get('coverage_pct')}% "
             f"-> {debug.get('status')}: {debug.get('reason')}"
             + (f" (hugin fell back: {debug['hugin_reason']})" if debug.get('hugin_reason') else ""),
             flush=True,
