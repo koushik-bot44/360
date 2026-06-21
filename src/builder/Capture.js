@@ -207,7 +207,6 @@ export default class Capture {
     // aiming near the poles, so the pole shots are exempt.
     const rightV = (this._rightV || (this._rightV = new THREE.Vector3())).set(1, 0, 0).applyQuaternion(this._q);
     const roll = Math.asin(Math.max(-1, Math.min(1, rightV.y))) / DEG;
-    const showRoll = Math.abs(this.el) > 65 ? 0 : roll;   // poles: roll is meaningless
 
     // 3) Next target — STICKY, by TRUE angular distance between aim and target:
     //    keep the current one until it's captured, switching only when another
@@ -245,9 +244,6 @@ export default class Capture {
       }
       dot.style.display = 'flex';
       dot.style.left = clamp(x) + '%'; dot.style.top = clamp(y) + '%';
-      // the active GREEN CARD rotates with phone roll (so it sits crooked in the
-      // fixed white box when you tilt) — straighten until it's square = level shot
-      dot.style.transform = `translate(-50%, -50%) rotate(${-showRoll}deg)`;
       dot.classList.remove('done', 'pending');
       dot.classList.toggle('current', true);
       dot.classList.toggle('edge', !onscreen);                     // riding the edge = "turn this way"
