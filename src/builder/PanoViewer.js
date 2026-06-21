@@ -65,6 +65,7 @@ export default class PanoViewer {
 
     this._raycaster = new THREE.Raycaster();
     this._dotTexture = this._makeDotTexture();
+    this._arrowTexture = this._makeArrowTexture();
 
     this._bind();
     this.resize();
@@ -83,6 +84,24 @@ export default class PanoViewer {
     x.beginPath(); x.arc(64, 64, 26, 0, Math.PI * 2);
     x.fillStyle = '#ffffff'; x.fill();
     x.lineWidth = 4; x.strokeStyle = 'rgba(0,0,0,0.25)'; x.stroke();
+    const t = new THREE.CanvasTexture(c);
+    t.needsUpdate = true;
+    return t;
+  }
+
+  // a flat chevron arrow (points toward +Y of its plane) for floor navigation
+  _makeArrowTexture() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const x = c.getContext('2d');
+    x.translate(64, 64);
+    x.fillStyle = 'rgba(255,255,255,0.92)';
+    x.strokeStyle = 'rgba(0,0,0,0.35)'; x.lineWidth = 5; x.lineJoin = 'round';
+    x.beginPath();
+    x.moveTo(0, -46); x.lineTo(42, 2); x.lineTo(18, 2); x.lineTo(18, 44);
+    x.lineTo(-18, 44); x.lineTo(-18, 2); x.lineTo(-42, 2);
+    x.closePath();
+    x.fill(); x.stroke();
     const t = new THREE.CanvasTexture(c);
     t.needsUpdate = true;
     return t;
@@ -197,14 +216,36 @@ export default class PanoViewer {
 
   addHotspot(data) {
     // data: { id, dir:{x,y,z}, target, label }
+    const d = new THREE.Vector3(data.dir.x, data.dir.y, data.dir.z).normalize();
+
+    if (this.mode === 'play') {
+      // floor-anchored arrow pointing toward the linked room (Street View style)
+      const horiz = new THREE.Vector3(d.x, 0, d.z);
+      if (horiz.lengthSq() < 1e-4) horiz.set(0, 0, -1);
+      horiz.normalize();
+      const up = new THREE.Vector3(0, 1, 0);
+      const right = new THREE.Vector3().crossVectors(horiz, up).normalize();
+      const basis = new THREE.Matrix4().makeBasis(right, horiz, up);  // tip(+Y)→outward, normal(+Z)→up
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(90, 90),
+        new THREE.MeshBasicMaterial({ map: this._arrowTexture, transparent: true,
+          depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+      mesh.quaternion.setFromRotationMatrix(basis);
+      const pos = horiz.clone().multiplyScalar(HOTSPOT_R * 0.55);
+      pos.y = -HOTSPOT_R * 0.45;                                       // down on the floor
+      mesh.position.copy(pos);
+      this.hotspotGroup.add(mesh);
+      this.markers.push({ mesh, data, base: 1 });
+      return;
+    }
+
+    // build/place mode: a wall dot where you placed it
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: this._dotTexture, transparent: true, depthTest: false,
     }));
-    const d = new THREE.Vector3(data.dir.x, data.dir.y, data.dir.z).normalize();
     sprite.position.copy(d.multiplyScalar(HOTSPOT_R));
     sprite.scale.set(34, 34, 1);
     this.hotspotGroup.add(sprite);
-    this.markers.push({ mesh: sprite, data });
+    this.markers.push({ mesh: sprite, data, base: 34 });
   }
 
   setHotspots(list) {
@@ -259,9 +300,10 @@ export default class PanoViewer {
       );
       this.camera.lookAt(target);
     }
-    // gentle pulse on hotspots so they read as interactive
-    const s = 34 + Math.sin(performance.now() * 0.004) * 3;
-    this.markers.forEach(m => m.mesh.scale.set(s, s, 1));
+    // gentle pulse on hotspots so they read as interactive (relative to each
+    // marker's base size — dots are ~34, floor arrows sized by their geometry)
+    const pulse = 1 + Math.sin(performance.now() * 0.004) * 0.07;
+    this.markers.forEach(m => { const b = (m.base || 34) * pulse; m.mesh.scale.set(b, b, 1); });
     this.renderer.render(this.scene, this.camera);
   }
 }
