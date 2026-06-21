@@ -251,7 +251,7 @@ def parse_orientation(name):
     return (float(yaw), float(pit))
 
 
-def _stitch_oriented(image_paths, orientations, width=TARGET_WIDTH):
+def _stitch_oriented(image_paths, orientations, width=TARGET_WIDTH, feather_pow=16):
     """Orientation-based stitch: project each photo onto the equirectangular
     sphere at the angle it was SHOT (yaw/pitch from capture) and feather-blend.
     Positions are known, not solved — so it never funnels and always fills the
@@ -300,7 +300,7 @@ def _stitch_oriented(image_paths, orientations, width=TARGET_WIDTH):
         mx = ((nx + 1) / 2 * (pw - 1)).astype(np.float32)
         my = ((1 - (ny + 1) / 2) * (ph - 1)).astype(np.float32)
         warped = cv2.remap(img, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
-        feather = np.clip(1 - np.maximum(np.abs(nx), np.abs(ny)), 0, 1) ** 4
+        feather = np.clip(1 - np.maximum(np.abs(nx), np.abs(ny)), 0, 1) ** feather_pow
         w = (feather * inside).astype(np.float32)
         acc += warped.astype(np.float32) * w[..., None]
         wsum += w
