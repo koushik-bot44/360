@@ -256,6 +256,14 @@ export default class Capture {
     this.crosshair.classList.toggle('warn', !!this._walking);
     this.crosshair.classList.toggle('tilt', !!(aimed && !level));
 
+    // Alignment box mirrors the crosshair state; the level line rotates with the
+    // phone's roll (flat = straight) — at the poles roll is meaningless, so flat.
+    this.box.classList.toggle('locked', !!locked);
+    this.box.classList.toggle('warn', !!this._walking);
+    this.box.classList.toggle('tilt', !!(aimed && !level));
+    const showRoll = Math.abs(this.el) > 65 ? 0 : roll;
+    this.level.style.transform = `translate(-50%, -50%) rotate(${-showRoll}deg)`;
+
     // hands-free auto-capture: hold aligned & steady for AUTO_MS → snap
     if (locked) {
       if (!this._lockStart) this._lockStart = now;
@@ -395,6 +403,8 @@ export default class Capture {
     this.root = $('capture-overlay');
     this.video = $('cap-video');
     this.crosshair = $('cap-crosshair');
+    this.box = $('cap-box');
+    this.level = $('cap-level');
     this.needle = $('cap-needle');
     this.dotsLayer = $('cap-dots');
     this.dots = {};

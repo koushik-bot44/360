@@ -187,6 +187,19 @@ body.play-mode .play-chrome { display: block; }
 .cap-dot.done span::after { content: ' ✓'; }
 @keyframes capPulse { 0%,100% { box-shadow: 0 0 0 4px rgba(245,197,24,.25); } 50% { box-shadow: 0 0 0 12px rgba(245,197,24,0); } }
 
+/* center alignment box — fit the target dot inside it; the level line shows roll */
+.cap-box { position: absolute; top: 50%; left: 50%; width: 150px; height: 200px;
+  transform: translate(-50%, -50%); border: 3px solid rgba(255,255,255,.8);
+  border-radius: 16px; pointer-events: none; transition: border-color .15s, box-shadow .15s; }
+.cap-box.locked { border-color: #34c759; box-shadow: 0 0 26px rgba(52,199,89,.55); }
+.cap-box.tilt  { border-color: #ffcc00; }
+.cap-box.warn  { border-color: #ff4d4d; }
+.cap-level { position: absolute; top: 50%; left: 50%; width: 78%; height: 0;
+  border-top: 3px solid rgba(255,255,255,.7); transform: translate(-50%, -50%) rotate(0deg);
+  transform-origin: center; transition: border-color .15s; }
+.cap-box.locked .cap-level { border-top-color: #34c759; }
+.cap-box.tilt  .cap-level { border-top-color: #ffcc00; }
+
 .cap-crosshair { position: absolute; top: 50%; left: 50%; width: 84px; height: 84px; transform: translate(-50%, -50%);
   pointer-events: none; }
 .ch-ring { position: absolute; inset: 0; border: 2px solid rgba(255,255,255,.85); border-radius: 50%; transition: border-color .15s, transform .15s; }
