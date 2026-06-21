@@ -175,7 +175,8 @@ def _stitch_hugin(image_paths):
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     try:
-        run(["pto_gen", "-o", str(pto), *[str(p) for p in image_paths]])
+        # absolute paths — pto_gen runs with cwd=work, so relative paths wouldn't resolve
+        run(["pto_gen", "-o", str(pto), *[str(Path(p).resolve()) for p in image_paths]])
         # control points (multirow handles ring captures; celeste drops sky points)
         run(["cpfind", "--multirow", "--celeste", "-o", str(pto), str(pto)])
         run(["cpclean", "-o", str(pto), str(pto)])
@@ -218,6 +219,24 @@ def _stitch_hugin(image_paths):
         shutil.rmtree(work, ignore_errors=True)
 
 
+def _stitch_openstitching(image_paths):
+    """Stitch with the OpenStitching package — OpenCV's *detailed* pipeline (SIFT,
+    bundle adjustment, spherical warp, gain compensation, multi-band blend) with
+    much better defaults than the raw cv2.Stitcher. Returns (spherical BGR strip
+    or None, reason). Used as the fallback when Hugin is unavailable or fails."""
+    try:
+        from stitching import Stitcher
+    except ImportError:
+        return None, "stitching package not installed"
+    try:
+        st = Stitcher(detector="sift", confidence_threshold=0.5,
+                      warper_type="spherical", crop=False)
+        pano = st.stitch([str(p) for p in image_paths])
+        return pano, "ok"
+    except Exception as e:                       # StitchingError etc. → fall through
+        return None, f"{type(e).__name__}: {e}".strip()[:200]
+
+
 def stitch_panorama(image_paths):
     """Stitch photos -> (equirect BGR image or None, debug dict)."""
     imgs, names = _load(image_paths)
@@ -249,9 +268,22 @@ def stitch_panorama(image_paths):
                          output_resolution=[int(hpano.shape[1]), int(hpano.shape[0])],
                          vertical_fov_deg=180.0)
             return hpano, debug
-        debug["hugin_reason"] = hreason          # record why we fell back to OpenCV
+        debug["hugin_reason"] = hreason          # record why we fell back
 
-    # OpenCV fallback. Try progressively more forgiving confidence thresholds:
+    # Second choice: OpenStitching (OpenCV's detailed pipeline, far better tuned
+    # than the raw cv2.Stitcher below). Its output is a spherical-warped strip,
+    # same as cv2's PANORAMA mode, so the same equirect placement applies.
+    ospano, osreason = _stitch_openstitching(image_paths)
+    if ospano is not None:
+        equirect, vfov, _ = _spherical_to_equirect(ospano)
+        debug.update(engine="openstitching", status="ok", reason="ok",
+                     raw_panorama_resolution=[int(ospano.shape[1]), int(ospano.shape[0])],
+                     output_resolution=[int(equirect.shape[1]), int(equirect.shape[0])],
+                     vertical_fov_deg=round(vfov, 1))
+        return equirect, debug
+    debug["openstitching_reason"] = osreason
+
+    # Last resort: raw cv2.Stitcher. Try progressively more forgiving confidence
     # handheld captures have uneven overlap, and the default (1.0) rejects
     # borderline pairs and fails with NEED_MORE_IMGS even when a good panorama is
     # possible. A higher registration resolution gives the feature matcher more
