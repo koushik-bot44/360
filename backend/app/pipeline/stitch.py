@@ -265,12 +265,12 @@ def _stitch_oriented(image_paths, orientations, width=TARGET_WIDTH):
     cl = np.cos(lat)
     dirs = np.stack([cl * np.sin(lon), np.sin(lat), -cl * np.cos(lon)], axis=-1)
 
-    # Winner-take-all seam compositing: each output pixel is taken from the SINGLE
-    # photo most centered on that direction, so two overlapping photos are never
-    # averaged together — that averaging is what doubled objects into "ghosts".
-    # Seams fall midway between neighbouring shots, like tiling each side.
-    out = np.full((H, W, 3), 16.0, np.float32)
-    best = np.full((H, W), -1.0, np.float32)
+    # Track the TOP-2 photos per pixel by "centeredness", then blend them only in a
+    # thin band right at the seam (where their centeredness is ~equal). Photo
+    # interiors stay 100% one source (sharp, no ghosting); only the hard seam line
+    # softens into a smooth transition. No global blur, so no haze either.
+    best1 = np.full((H, W), -1.0, np.float32); col1 = np.full((H, W, 3), 16.0, np.float32)
+    best2 = np.full((H, W), -1.0, np.float32); col2 = np.full((H, W, 3), 16.0, np.float32)
     placed = 0
     for path, ori in zip(image_paths, orientations):
         if ori is None:
@@ -303,17 +303,22 @@ def _stitch_oriented(image_paths, orientations, width=TARGET_WIDTH):
         inside = front & (np.abs(nx) <= 1) & (np.abs(ny) <= 1)
         mx = ((nx + 1) / 2 * (pw - 1)).astype(np.float32)
         my = ((1 - (ny + 1) / 2) * (ph - 1)).astype(np.float32)
-        warped = cv2.remap(img, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
-        # centeredness: 1 at the photo's centre, 0 at its frame edge. The pixel is
-        # claimed by whichever photo is most centred on it (no averaging).
-        weight = np.where(inside, np.clip(1 - np.maximum(np.abs(nx), np.abs(ny)), 0, 1), -1.0)
-        take = weight > best
-        out[take] = warped[take]
-        best[take] = weight[take]
+        warped = cv2.remap(img, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT).astype(np.float32)
+        cen = np.where(inside, np.clip(1 - np.maximum(np.abs(nx), np.abs(ny)), 0, 1), -1.0).astype(np.float32)
+        a = cen > best1                                 # new winner → demote old to runner-up
+        best2 = np.where(a, best1, best2); col2 = np.where(a[..., None], col1, col2)
+        best1 = np.where(a, cen, best1); col1 = np.where(a[..., None], warped, col1)
+        b = (~a) & (cen > best2)                         # new runner-up
+        best2 = np.where(b, cen, best2); col2 = np.where(b[..., None], warped, col2)
         placed += 1
 
     if placed < 2:
         return None, placed
+    band = 0.05                                          # seam-transition width (centeredness units)
+    t = np.clip((best1 - best2) / band, 0.0, 1.0)        # 0 at the seam, 1 deep in a photo's territory
+    mix = (0.5 + 0.5 * t)[..., None]                     # owner-1 fraction (50/50 exactly at the seam)
+    out = np.where((best2 >= 0)[..., None], col1 * mix + col2 * (1.0 - mix), col1)
+    out = np.where((best1 >= 0)[..., None], out, 16.0)
     return out.astype(np.uint8), placed
 
 
