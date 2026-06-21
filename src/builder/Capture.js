@@ -326,10 +326,17 @@ export default class Capture {
     if (!ctx) return;
     const w = this._covCanvas.width, h = this._covCanvas.height;
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(0, 0, w, h);
     const X = (az) => ((az % 360 + 360) % 360) / 360 * w;
-    const Y = (el) => (90 - el) / 180 * h;
+    const Y = (el) => (90 - el) / 180 * h;          // +90 top, 0 = horizon (middle), -90 bottom
+
+    // reference lines so "middle = horizon" is unmistakable
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, Y(0)); ctx.lineTo(w, Y(0)); ctx.stroke();   // horizon
+    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '8px sans-serif';
+    ctx.fillText('up', 3, 9); ctx.fillText('floor', 3, h - 3);
+
     for (let i = 0; i < COVERAGE_CELLS.length; i++) {
       const c = COVERAGE_CELLS[i];
       ctx.beginPath();
@@ -337,10 +344,11 @@ export default class Capture {
       ctx.fillStyle = c._cov ? '#34c759' : 'rgba(255,255,255,0.22)';
       ctx.fill();
     }
+    // where you're aiming (white, outlined)
     ctx.beginPath();
-    ctx.arc(X(this.az), Y(this.el), 3.6, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff';
-    ctx.fill();
+    ctx.arc(X(this.az), Y(this.el), 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.stroke();
   }
 
   // variance of Laplacian — higher = sharper

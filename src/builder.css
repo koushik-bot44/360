@@ -224,8 +224,8 @@ body.play-mode .play-chrome { display: block; }
 .cap-hold.active { opacity: 1; }
 
 /* live coverage map (continuous sweep) — green fills in as you paint the sphere */
-.cap-coverage { position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
-  width: 180px; height: 90px; border-radius: 10px; border: 1px solid rgba(255,255,255,.25);
+.cap-coverage { position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
+  width: 220px; height: 110px; border-radius: 10px; border: 1px solid rgba(255,255,255,.25);
   background: rgba(0,0,0,.35); z-index: 6; pointer-events: none; }
 /* brief white flash when a shot is taken */
 .capture-overlay.cap-flash::after { content: ''; position: absolute; inset: 0;
