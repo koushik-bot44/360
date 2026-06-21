@@ -77,6 +77,11 @@ export default class Builder {
       $('play-gyro-btn').classList.toggle('active', on);
       if (!on) this._toast && this._toast('Move your phone to look around — tap 📱 again for drag');
     });
+    $('play-autoplay-btn').addEventListener('click', () => {
+      const on = this.viewer.toggleAutoplay();
+      $('play-autoplay-btn').classList.toggle('active', on);
+      $('play-autoplay-btn').textContent = on ? '⏸' : '▶';
+    });
     $('play-info-btn').addEventListener('click', () => $('play-info').classList.toggle('hidden'));
     $('play-info-close').addEventListener('click', () => $('play-info').classList.add('hidden'));
   }

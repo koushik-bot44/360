@@ -49,6 +49,7 @@ export default class PanoViewer {
 
     // look state
     this.lon = 0; this.lat = 0;
+    this._autoplay = false;          // slow auto-spin of the view
     // gyro look-around (play mode): follow the phone's orientation
     this._gyro = false; this._gyroDev = null; this._gyroQ = new THREE.Quaternion();
     this._onDeviceOrient = (e) => {
@@ -99,8 +100,8 @@ export default class PanoViewer {
       const dx = e.clientX - this._px;
       const dy = e.clientY - this._py;
       if (Math.abs(e.clientX - this._downX) + Math.abs(e.clientY - this._downY) > 4) this._moved = true;
-      this.lon -= dx * 0.13;
-      this.lat = Math.max(-85, Math.min(85, this.lat + dy * 0.13));
+      this.lon -= dx * 0.22;
+      this.lat = Math.max(-85, Math.min(85, this.lat + dy * 0.22));
       this._px = e.clientX; this._py = e.clientY;
     });
     window.addEventListener('pointerup', (e) => {
@@ -204,7 +205,11 @@ export default class PanoViewer {
     } catch (e) { return false; }
   }
 
+  toggleAutoplay() { this._autoplay = !this._autoplay; return this._autoplay; }
+
   _loop() {
+    // auto-spin slowly (disabled while dragging or in gyro mode)
+    if (this._autoplay && !this._gyro && !this._isDown) this.lon -= 0.08;
     if (this._gyro && this._gyroDev) {
       // follow the phone: drive the camera straight from device orientation
       const sa = (window.screen.orientation && window.screen.orientation.angle) || window.orientation || 0;
