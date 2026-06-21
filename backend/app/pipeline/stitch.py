@@ -185,9 +185,22 @@ def _stitch_hugin(image_paths):
         # poles aren't trimmed away (omitting --crop leaves the canvas uncropped).
         run(["pano_modify", "--projection=2", "--fov=360x180",
              "--canvas=AUTO", "-o", str(pto), str(pto)])
-        run(["hugin_executor", "--stitching", "--prefix=pano", str(pto)])
 
-        outs = sorted(glob.glob(str(work / "pano*.tif")) + glob.glob(str(work / "pano*.jpg")))
+        # Blend. enblend is best but can bail ("invalid output image") on real
+        # captures with imperfect/low-overlap layers. If it does, retry with
+        # Hugin's internal blender (verdandi), which is far more tolerant.
+        def stitched():
+            return sorted(glob.glob(str(work / "pano*.tif")) + glob.glob(str(work / "pano*.jpg")))
+        try:
+            run(["hugin_executor", "--stitching", "--prefix=pano", str(pto)])
+        except subprocess.CalledProcessError:
+            for f in stitched():
+                os.remove(f)
+            with open(pto, "a") as fh:                  # switch blender, then retry
+                fh.write("\n#hugin_blender internal\n")
+            run(["hugin_executor", "--stitching", "--prefix=pano", str(pto)])
+
+        outs = stitched()
         if not outs:
             return None, "hugin produced no output"
         img = cv2.imread(outs[0], cv2.IMREAD_COLOR)
