@@ -11,6 +11,21 @@ import * as THREE from 'three';
 const SPHERE_R = 500;
 const HOTSPOT_R = 470;
 
+// device orientation (deg) → camera world quaternion (same convention as capture),
+// so play-mode look-around can follow the phone like Street View / Look Around.
+const DEG = Math.PI / 180;
+const _zee = new THREE.Vector3(0, 0, 1);
+const _q0 = new THREE.Quaternion();
+const _q1 = new THREE.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2);
+const _euler = new THREE.Euler();
+function deviceQuaternion(out, alpha, beta, gamma, screen) {
+  _euler.set(beta * DEG, alpha * DEG, -gamma * DEG, 'YXZ');
+  out.setFromEuler(_euler);
+  out.multiply(_q1);
+  out.multiply(_q0.setFromAxisAngle(_zee, -screen * DEG));
+  return out;
+}
+
 export default class PanoViewer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -34,6 +49,12 @@ export default class PanoViewer {
 
     // look state
     this.lon = 0; this.lat = 0;
+    // gyro look-around (play mode): follow the phone's orientation
+    this._gyro = false; this._gyroDev = null; this._gyroQ = new THREE.Quaternion();
+    this._onDeviceOrient = (e) => {
+      if (e.alpha == null) return;
+      this._gyroDev = { alpha: e.alpha, beta: e.beta || 0, gamma: e.gamma || 0 };
+    };
     this._isDown = false; this._moved = false;
     this._px = 0; this._py = 0; this._downX = 0; this._downY = 0;
 
@@ -164,15 +185,41 @@ export default class PanoViewer {
     this.camera.updateProjectionMatrix();
   }
 
+  // Toggle phone-motion look-around. Returns the new state (needs a user gesture
+  // for the iOS permission prompt, so call it from a click handler).
+  async toggleGyro() {
+    if (this._gyro) {
+      window.removeEventListener('deviceorientation', this._onDeviceOrient);
+      this._gyro = false; this._gyroDev = null;
+      return false;
+    }
+    try {
+      const DOE = window.DeviceOrientationEvent;
+      if (DOE && typeof DOE.requestPermission === 'function') {
+        if (await DOE.requestPermission() !== 'granted') return false;
+      }
+      window.addEventListener('deviceorientation', this._onDeviceOrient);
+      this._gyro = true;
+      return true;
+    } catch (e) { return false; }
+  }
+
   _loop() {
-    const phi = THREE.MathUtils.degToRad(90 - this.lat);
-    const theta = THREE.MathUtils.degToRad(this.lon);
-    const target = new THREE.Vector3(
-      100 * Math.sin(phi) * Math.cos(theta),
-      100 * Math.cos(phi),
-      100 * Math.sin(phi) * Math.sin(theta)
-    );
-    this.camera.lookAt(target);
+    if (this._gyro && this._gyroDev) {
+      // follow the phone: drive the camera straight from device orientation
+      const sa = (window.screen.orientation && window.screen.orientation.angle) || window.orientation || 0;
+      deviceQuaternion(this._gyroQ, this._gyroDev.alpha, this._gyroDev.beta, this._gyroDev.gamma, sa);
+      this.camera.quaternion.copy(this._gyroQ);
+    } else {
+      const phi = THREE.MathUtils.degToRad(90 - this.lat);
+      const theta = THREE.MathUtils.degToRad(this.lon);
+      const target = new THREE.Vector3(
+        100 * Math.sin(phi) * Math.cos(theta),
+        100 * Math.cos(phi),
+        100 * Math.sin(phi) * Math.sin(theta)
+      );
+      this.camera.lookAt(target);
+    }
     // gentle pulse on hotspots so they read as interactive
     const s = 34 + Math.sin(performance.now() * 0.004) * 3;
     this.markers.forEach(m => m.mesh.scale.set(s, s, 1));

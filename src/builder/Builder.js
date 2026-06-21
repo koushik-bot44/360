@@ -72,6 +72,11 @@ export default class Builder {
     this.viewer.onPlace = (dir) => this._onPlace(dir);
     this.viewer.onHotspot = (data) => this._onHotspotClick(data);
     // play-mode controls (also needed when booting from a shared link)
+    $('play-gyro-btn').addEventListener('click', async () => {
+      const on = await this.viewer.toggleGyro();
+      $('play-gyro-btn').classList.toggle('active', on);
+      if (!on) this._toast && this._toast('Move your phone to look around — tap 📱 again for drag');
+    });
     $('play-info-btn').addEventListener('click', () => $('play-info').classList.toggle('hidden'));
     $('play-info-close').addEventListener('click', () => $('play-info').classList.add('hidden'));
   }
