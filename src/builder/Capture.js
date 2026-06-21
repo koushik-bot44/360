@@ -49,6 +49,7 @@ const DEG = Math.PI / 180;
 const GRAB_ANGLE = 14;     // grab a frame once aim has moved this far from EVERY shot
 const COVER_RADIUS = 22;   // a coverage cell counts as filled if a shot lies within this
 const COVERAGE_TARGET = 86; // % of the sphere covered before Finish enables
+const STEADY_SPEED = 1.6;  // max aim speed (deg/frame) to grab — blocks fast swipes (blur)
 
 const $ = (id) => document.getElementById(id);
 
@@ -226,8 +227,15 @@ export default class Capture {
     // 3) CONTINUOUS CAPTURE — paint the sphere as you sweep. Grab a frame whenever
     //    the aim has moved GRAB_ANGLE from EVERY frame we already have: a dense,
     //    overlapping sweep instead of discrete dots. Blurry/tilted/walking skipped.
+    // angular speed of the aim — only grab when moving slowly enough to be sharp
+    // (continuous frames grabbed mid-swing carry motion blur).
+    const prevFwd = this._prevFwd || (this._prevFwd = fwd.clone());
+    const speed = fwd.angleTo(prevFwd) / DEG;
+    this._prevFwd.copy(fwd);
+    const steady = speed < STEADY_SPEED;
+
     const level = Math.abs(this.el) > 65 || Math.abs(roll) < ROLL_MAX;    // poles exempt
-    if (this.hasOrientation && !this._walking && level && !this._grabBusy) {
+    if (this.hasOrientation && !this._walking && level && steady && !this._grabBusy) {
       let minD = Infinity;
       for (let i = 0; i < this._shots.length; i++) {
         const d = fwd.angleTo(this._shots[i].vec) / DEG;
@@ -263,6 +271,7 @@ export default class Capture {
     else if (!this.hasOrientation) msg = 'Allow motion access, then sweep slowly';
     else if (!gap) msg = '✓ Sphere complete — press Finish to stitch';
     else if (!level) msg = roll > 0 ? '↺ Hold level — tilting right' : '↻ Hold level — tilting left';
+    else if (!steady) msg = '🐢 Sweep slower for sharp shots';
     else {
       const dAz = ((gap.az - this.az + 540) % 360) - 180;
       const dEl = gap.el - this.el;
