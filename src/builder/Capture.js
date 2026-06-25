@@ -1,63 +1,50 @@
 /**
- * Capture.js — AR-guided FULL-SPHERE panorama capture.
+ * Capture.js — AR-guided FULL-SPHERE panorama capture (discrete auto-snap).
  *
- * Opens the device camera and overlays reticle dots at the yaw/pitch positions
- * still to be shot. The pattern is three rings + the two poles for full 360×180
- * coverage (no dark floor/ceiling): a dense middle ring (12 @ 0°, every 30°), an
- * upper ring (6 @ +45°), a lower ring (6 @ −45°), and zenith/nadir — 26 targets.
- * To stay clean (like a guided street-view capture) only the NEXT target dot is
- * shown at a time; aim it into the crosshair and — once aligned and steady for a
- * moment — it AUTO-captures (no tapping). Each target is a DIRECTION on a sphere
- * (yaw/pitch); we project it through the phone's live orientation quaternion, so
- * the dot stays WORLD-LOCKED — pinned to its real point on the wall (like VR
- * geometry) instead of sliding with the screen. On a phone the dot tracks your
- * motion (DeviceOrientationEvent); on desktop you drag to look.
- * Quality gates: blur rejection (variance of Laplacian) and walk detection
- * (accelerometer warns if you translate instead of rotating). When enough is
- * captured it hands an ordered list of JPEG blobs (named by yaw/pitch) to
- * onComplete for stitching → POST /panorama → full-sphere equirectangular.
+ * Shows target dots at fixed yaw/pitch DIRECTIONS around you. Aim the next dot
+ * (a card) into the centre box; once it's aligned, level and steady, a hold ring
+ * fills and it AUTO-SNAPS one sharp photo for that spot, marks it done, and moves
+ * to the next. This deliberate "take a picture at each spot" flow (vs. a continuous
+ * sweep) gives the stitcher SHARP, well-spaced photos at clean angles — no motion
+ * blur, no glitchy mid-swing compass readings, far fewer frames — which is exactly
+ * the seed the backend wants. Each photo is named by the yaw/pitch it was shot at
+ * (y..._p...), so POST /panorama can seed the Hugin solve and stitch it crisply.
+ *
+ * Quality gates: blur rejection (variance of Laplacian), level check (phone roll),
+ * walk detection (accelerometer). Dots are world-locked via the live orientation
+ * quaternion, so they stay pinned to their real point in the room.
  */
 import * as THREE from 'three';
 
-// Full-sphere target set (26): a DENSE middle ring (every 30°) + upper/lower
-// rings (every 60°) + explicit zenith/nadir. Tight spacing matters because a
-// phone in portrait has only ~50° horizontal FOV — at 45° spacing consecutive
-// shots barely overlapped (~10%), so the ring wouldn't close and the panorama
-// collapsed. 30° spacing gives ~40% overlap → the stitcher can lock the loop.
+// Full-sphere target set (30): dense middle ring (12 @ 30°) for ~45% overlap with
+// a ~55° portrait lens; upper/lower rings (8 each @ 45°, tilted ±40°) that overlap
+// both each other and the middle ring; plus zenith + nadir. More points = more
+// overlap = the stitcher gets a denser, better-constrained solve (this is the
+// ~30-shot density 360 capture apps use). Each is a fixed yaw/pitch DIRECTION.
 const TARGETS = [
   ...Array.from({ length: 12 }, (_, i) => ({ key: `m${i}`, label: `${i * 30}°`, az: i * 30, el: 0 })),
-  ...Array.from({ length: 8 }, (_, i) => ({ key: `u${i}`, label: '↑', az: i * 45 + 22, el: 45 })),
-  ...Array.from({ length: 8 }, (_, i) => ({ key: `d${i}`, label: '↓', az: i * 45, el: -45 })),
-  { key: 'zen0', label: '⤒ up', az: 0, el: 87 },
-  { key: 'zen1', label: '⤒ up', az: 180, el: 87 },
-  { key: 'nad0', label: '⤓ down', az: 0, el: -87 },
-  { key: 'nad1', label: '⤓ down', az: 180, el: -87 },
+  ...Array.from({ length: 8 }, (_, i) => ({ key: `u${i}`, label: '↑ up', az: i * 45 + 22, el: 40 })),
+  ...Array.from({ length: 8 }, (_, i) => ({ key: `d${i}`, label: '↓ down', az: i * 45, el: -40 })),
+  { key: 'zen', label: '⤒ ceiling', az: 0, el: 88 },
+  { key: 'nad', label: '⤓ floor', az: 0, el: -88 },
 ];
 
-const MIN_SHOTS = 8;       // the middle ring alone already gives a usable panorama
+const MIN_DONE = 16;       // enable Finish once the ring + a few up/down are done
 const FOV = 65;            // assumed phone horizontal FOV (deg) for projecting dots
-const LOCK_ANGLE = 12;     // deg between aim and target to lock
-const ROLL_MAX = 10;       // deg of phone roll allowed before we refuse to capture
-                           // (level shots stitch far better — like the real app)
-const BLUR_MIN = 55;       // laplacian-variance threshold
+const LOCK_ANGLE = 10;     // deg between aim and target to count as "on target" (tighter)
+const ROLL_MAX = 7;        // deg of phone roll allowed before we refuse to capture
+                           // (strict like 360 Photo Cam: tilted frames ruin the
+                           // horizon/alignment, so we won't snap until it's level)
+const BLUR_MIN = 45;       // laplacian-variance threshold (deliberate shots are sharp)
 const WALK_ACCEL = 2.2;    // m/s² (gravity-excluded) sustained ⇒ "you're walking"
-const STICKY_MARGIN = 18;  // deg another target must beat the current one by to take over
-const AUTO_MS = 900;       // hold aligned & still this long → auto-capture (sharper)
-const Q_SMOOTH = 0.35;     // orientation slerp per frame — light, so it stays responsive
+const AUTO_MS = 1100;      // hold aligned + steady this long → auto-snap (no early grabs)
+const STEADY_SPEED = 1.6;  // max aim speed (deg/frame) to count as steady (stricter)
+const Q_SMOOTH = 0.35;     // orientation slerp per frame — light, stays responsive
 const DEG = Math.PI / 180;
-// continuous-capture ("paint the sphere") tuning
-const GRAB_ANGLE = 14;     // grab a frame once aim has moved this far from EVERY shot
-const COVER_RADIUS = 22;   // a coverage cell counts as filled if a shot lies within this
-const COVERAGE_TARGET = 86; // % of the sphere covered before Finish enables
-const STEADY_SPEED = 1.6;  // max aim speed (deg/frame) to grab — blocks fast swipes (blur)
 
 const $ = (id) => document.getElementById(id);
 
 // --- World-locked projection ------------------------------------------------
-// A panorama assumes you rotate in place, so each target is a fixed DIRECTION on
-// a unit sphere (yaw=az, pitch=el). We build the phone's orientation quaternion
-// and perspective-project the direction onto the screen, so the dot stays pinned
-// to its real-world point (including phone roll) — not just slid linearly.
 const _zee = new THREE.Vector3(0, 0, 1);
 const _euler = new THREE.Euler();
 const _q0 = new THREE.Quaternion();
@@ -70,23 +57,6 @@ function vecFromAzEl(az, el) {                 // (deg) → unit direction on th
   const a = az * DEG, ce = Math.cos(el * DEG);
   return new THREE.Vector3(ce * Math.sin(a), Math.sin(el * DEG), -ce * Math.cos(a));
 }
-function targetVec(t) { return t._vec || (t._vec = vecFromAzEl(t.az, t.el)); }
-
-// Roughly equal-area sphere tessellation — the "coverage map" cells that light up
-// green as your sweep paints them. Fewer cells per ring near the poles.
-const COVERAGE_CELLS = (() => {
-  const cells = [];
-  for (const el of [-78, -52, -26, 0, 26, 52, 78]) {
-    const n = Math.max(1, Math.round(14 * Math.cos(el * DEG)));
-    for (let i = 0; i < n; i++) {
-      const az = i * 360 / n;
-      cells.push({ az, el, vec: vecFromAzEl(az, el), _cov: false });
-    }
-  }
-  cells.push({ az: 0, el: 90, vec: vecFromAzEl(0, 90), _cov: false });
-  cells.push({ az: 0, el: -90, vec: vecFromAzEl(0, -90), _cov: false });
-  return cells;
-})();
 
 // device orientation (deg) → camera world quaternion (W3C / THREE convention)
 function deviceQuaternion(out, alpha, beta, gamma, screen) {
@@ -105,25 +75,28 @@ function lookQuaternion(out, az, el) {
 export default class Capture {
   constructor(onComplete) {
     this.onComplete = onComplete;
-    this._shots = [];          // continuous capture: [{ canvas, az, el, vec, t }]
     this.az = 0; this.el = 0;
     this.hasOrientation = false;
     this.stream = null;
     this.raf = null;
-    this._accelEMA = 0;        // smoothed linear-acceleration magnitude
+    this._accelEMA = 0;
     this._walking = false;
+    this._holdMs = 0;
     this._mkDom();
   }
 
   // ---------- lifecycle ----------
   async open(roomName) {
-    this._shots = [];
-    COVERAGE_CELLS.forEach(c => { c._cov = false; });
     this.roomName = roomName || 'Room';
-    this._t0 = (typeof performance !== 'undefined' ? performance.now() : 0);
+    // fresh target set for this capture
+    this._targets = TARGETS.map(t => ({ ...t, vec: vecFromAzEl(t.az, t.el),
+      done: false, canvas: null, azShot: 0, elShot: 0 }));
+    this._holdMs = 0;
+    this._buildDots();
     $('cap-room-name').textContent = this.roomName;
     this.root.classList.remove('hidden');
     document.body.classList.add('capturing');
+    this._toast('Aim each dot into the box, extend your arm, and hold steady — it snaps itself.');
 
     if (!this.raf) this._loop();
     this._initMotion();
@@ -154,14 +127,11 @@ export default class Capture {
   async _initMotion() {
     this._onOrient = (e) => {
       if (e.alpha == null) return;
-      // Just store the raw reading; the quaternion is built and smoothed in the
-      // loop (smoothing the full orientation, not a single noisy compass angle).
       this._dev = { alpha: e.alpha, beta: e.beta || 0, gamma: e.gamma || 0 };
       this.hasOrientation = true;
     };
-    // accelerometer → detect physical translation (walking) vs pure rotation
     this._onMotion = (e) => {
-      const a = e.acceleration || {};                       // gravity excluded
+      const a = e.acceleration || {};
       if (a.x == null) return;
       const mag = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
       this._accelEMA = this._accelEMA * 0.8 + mag * 0.2;
@@ -179,7 +149,6 @@ export default class Capture {
     setTimeout(() => { this.manual = !this.hasOrientation; this.root.classList.toggle('manual-mode', this.manual); }, 700);
   }
 
-  // current screen-rotation angle (deg) so projection holds when the phone rolls
   _screenAngle() {
     return (screen.orientation && screen.orientation.angle) || window.orientation || 0;
   }
@@ -195,21 +164,20 @@ export default class Capture {
   _loop() {
     this.raf = requestAnimationFrame(() => this._loop());
     const now = performance.now();
+    const dt = this._lastNow ? now - this._lastNow : 16;
+    this._lastNow = now;
 
-    // 1) Camera orientation quaternion (sensors on a phone, drag on desktop),
-    //    slerped toward the latest reading. Smoothing the WHOLE orientation —
-    //    not one noisy compass angle — is what stops the dot from shaking.
+    // 1) camera orientation quaternion (sensors on phone, drag on desktop)
     const qt = this._qTarget || (this._qTarget = new THREE.Quaternion());
     if (this.hasOrientation && this._dev) {
       deviceQuaternion(qt, this._dev.alpha, this._dev.beta, this._dev.gamma, this._screenAngle());
     } else {
-      lookQuaternion(qt, this.az, this.el);            // manual: aim from drag az/el
+      lookQuaternion(qt, this.az, this.el);
     }
     if (!this._q) this._q = qt.clone();
     else this._q.slerp(qt, this.hasOrientation ? Q_SMOOTH : 1);
 
-    // 2) Aim direction → az/el (drives the compass needle; in sensor mode keeps
-    //    this.az/el in sync with the smoothed quaternion).
+    // 2) aim direction → az/el
     const fwd = (this._fwd || (this._fwd = new THREE.Vector3())).set(0, 0, -1).applyQuaternion(this._q);
     if (this.hasOrientation) {
       this.az = (Math.atan2(fwd.x, -fwd.z) / DEG + 360) % 360;
@@ -217,74 +185,121 @@ export default class Capture {
     }
     this.needle.style.transform = `rotate(${this.az}deg)`;
 
-    // Phone roll (0 = level): the camera's right vector lifts off horizontal when
-    // you tilt the phone left/right. Like the real app, we refuse to capture a
-    // tilted frame — level shots stitch far better. Roll is ill-defined when
-    // aiming near the poles, so the pole shots are exempt.
+    // phone roll (0 = level); pole shots are exempt (roll ill-defined near poles)
     const rightV = (this._rightV || (this._rightV = new THREE.Vector3())).set(1, 0, 0).applyQuaternion(this._q);
     const roll = Math.asin(Math.max(-1, Math.min(1, rightV.y))) / DEG;
+    const level = Math.abs(this.el) > 65 || Math.abs(roll) < ROLL_MAX;
 
-    // 3) CONTINUOUS CAPTURE — paint the sphere as you sweep. Grab a frame whenever
-    //    the aim has moved GRAB_ANGLE from EVERY frame we already have: a dense,
-    //    overlapping sweep instead of discrete dots. Blurry/tilted/walking skipped.
-    // angular speed of the aim — only grab when moving slowly enough to be sharp
-    // (continuous frames grabbed mid-swing carry motion blur).
+    // aim speed → steadiness (don't snap mid-swing; it'd be blurry)
     const prevFwd = this._prevFwd || (this._prevFwd = fwd.clone());
     const speed = fwd.angleTo(prevFwd) / DEG;
     this._prevFwd.copy(fwd);
     const steady = speed < STEADY_SPEED;
 
-    const level = Math.abs(this.el) > 65 || Math.abs(roll) < ROLL_MAX;    // poles exempt
-    if (this.hasOrientation && !this._walking && level && steady && !this._grabBusy) {
-      let minD = Infinity;
-      for (let i = 0; i < this._shots.length; i++) {
-        const d = fwd.angleTo(this._shots[i].vec) / DEG;
-        if (d < minD) minD = d;
-        if (minD <= GRAB_ANGLE) break;
+    // 3) nearest UN-shot target to the current aim
+    let nextT = null, nextD = Infinity, doneCount = 0;
+    for (const t of this._targets) {
+      if (t.done) { doneCount++; continue; }
+      const d = fwd.angleTo(t.vec) / DEG;
+      if (d < nextD) { nextD = d; nextT = t; }
+    }
+    const onTarget = !!nextT && nextD <= LOCK_ANGLE;
+    const aligned = this.hasOrientation && onTarget && level && steady && !this._walking;
+    this._aligned = aligned;
+
+    // 4) draw the dots (world-locked) and centre box / hold state
+    this._renderDots(nextT);
+    this.box.classList.toggle('locked', aligned);
+    this.box.classList.toggle('tilt', this.hasOrientation && onTarget && !level && !this._walking);
+    this.box.classList.toggle('warn', !!this._walking);
+
+    // 5) auto-snap: hold aligned + steady for AUTO_MS, then capture this target
+    if (aligned) {
+      this._holdMs += dt;
+      const p = Math.min(1, this._holdMs / AUTO_MS);
+      this.hold.classList.add('active');
+      this.hold.style.background =
+        `conic-gradient(rgba(52,199,89,.9) ${p * 360}deg, rgba(255,255,255,.14) 0)`;
+      if (this._holdMs >= AUTO_MS && nextT) {
+        if (this._snap(nextT)) { this._flash(); }
+        this._holdMs = 0;
       }
-      if (minD > GRAB_ANGLE) {
-        this._grabBusy = true;
-        this._grabContinuous();
-        this._grabBusy = false;
-      }
+    } else {
+      this._holdMs = 0;
+      this.hold.classList.remove('active');
     }
 
-    // 4) Coverage map — which sphere cells now have a nearby shot; nearest gap.
-    let covered = 0, gap = null, gapD = Infinity;
-    for (let i = 0; i < COVERAGE_CELLS.length; i++) {
-      const c = COVERAGE_CELLS[i];
-      c._cov = false;
-      for (let j = 0; j < this._shots.length; j++) {
-        if (c.vec.angleTo(this._shots[j].vec) / DEG < COVER_RADIUS) { c._cov = true; break; }
-      }
-      if (c._cov) covered++;
-      else { const d = fwd.angleTo(c.vec) / DEG; if (d < gapD) { gapD = d; gap = c; } }
-    }
-    const pct = Math.round(covered / COVERAGE_CELLS.length * 100);
-    this._renderCoverage();
-    $('cap-progress').textContent = `${pct}%`;
-    this.box.classList.toggle('warn', !!this._walking);
-    this.box.classList.toggle('tilt', !!(this.hasOrientation && !level && !this._walking));
+    // 6) progress + guidance
+    const total = this._targets.length;
+    const enough = doneCount >= MIN_DONE;
+    $('cap-progress').textContent = `${doneCount}/${total}`;
+    $('cap-finish').disabled = !enough;
+    $('cap-finish').textContent = enough
+      ? `Finish & stitch (${doneCount})`
+      : `Capture the dots — ${doneCount}/${total}`;
+    $('cap-shoot').disabled = !nextT;
 
     let msg;
-    if (this._walking) msg = '⚠ Stay in one spot — turn in place, don\'t walk';
-    else if (!this.hasOrientation) msg = 'Allow motion access, then sweep slowly';
-    else if (!gap) msg = '✓ Sphere complete — press Finish to stitch';
-    else if (!level) msg = roll > 0 ? '↺ Hold level — tilting right' : '↻ Hold level — tilting left';
-    else if (!steady) msg = '🐢 Sweep slower for sharp shots';
+    if (this._walking) msg = '⚠ Stand still — turn in place, don\'t walk';
+    else if (!this.hasOrientation) msg = 'Allow motion access, then aim at the dots';
+    else if (!nextT) msg = '✓ All spots captured — press Finish to stitch';
+    else if (onTarget && !level) msg = roll > 0 ? '↺ Hold the phone level' : '↻ Hold the phone level';
+    else if (aligned) msg = '✓ Hold steady — capturing…';
+    else if (onTarget && !steady) msg = 'Hold steady on the dot';
     else {
-      const dAz = ((gap.az - this.az + 540) % 360) - 180;
-      const dEl = gap.el - this.el;
-      const dir = Math.abs(dAz) >= Math.abs(dEl) ? (dAz > 0 ? '→ right' : '← left')
-                                                 : (dEl > 0 ? '↑ up' : '↓ down');
-      msg = `Sweep ${dir} to fill the gap`;
+      const dAz = ((nextT.az - this.az + 540) % 360) - 180;
+      const dEl = nextT.el - this.el;
+      const dir = Math.abs(dAz) >= Math.abs(dEl) ? (dAz > 0 ? '→ turn right' : '← turn left')
+                                                 : (dEl > 0 ? '↑ tilt up' : '↓ tilt down');
+      msg = `Aim the card into the box — ${dir}`;
     }
     $('cap-guidance').textContent = msg;
+  }
 
-    const enough = pct >= COVERAGE_TARGET;
-    $('cap-shoot').disabled = false;
-    $('cap-finish').disabled = !enough;
-    $('cap-finish').textContent = enough ? `Finish & stitch (${this._shots.length})` : `Keep sweeping — ${pct}%`;
+  // ---------- dots ----------
+  _buildDots() {
+    this.dotsLayer.innerHTML = '';
+    this._dotEls = this._targets.map((t) => {
+      const d = document.createElement('div');
+      d.className = 'cap-dot pending';
+      const s = document.createElement('span');
+      s.textContent = t.label;
+      d.appendChild(s);
+      this.dotsLayer.appendChild(d);
+      return d;
+    });
+  }
+
+  // project each target through the live orientation and place its dot on screen
+  _renderDots(nextT) {
+    const qInv = (this._qInv || (this._qInv = new THREE.Quaternion())).copy(this._q).invert();
+    const { thx, thy } = this._fovTan();
+    const v = this._dv || (this._dv = new THREE.Vector3());
+    for (let i = 0; i < this._targets.length; i++) {
+      const t = this._targets[i], el = this._dotEls[i];
+      v.copy(t.vec).applyQuaternion(qInv);          // into camera space (looks −z)
+      let show = false, x = 0, y = 0, edge = false;
+      if (v.z < -0.05) {
+        x = (v.x / -v.z) / thx;                      // −1..1 across the half-FOV
+        y = (v.y / -v.z) / thy;
+        if (Math.abs(x) <= 1.35 && Math.abs(y) <= 1.35) {
+          show = true;
+          edge = Math.abs(x) > 1 || Math.abs(y) > 1;
+        }
+      }
+      let cls = 'cap-dot ';
+      if (t.done) cls += 'done';
+      else if (t === nextT) cls += 'current' + (this._aligned ? ' aligned' : '');
+      else cls += 'pending' + (edge ? ' edge' : '');
+      el.className = cls;
+      if (show) {
+        el.style.display = 'flex';
+        el.style.left = `${Math.max(3, Math.min(97, 50 + 50 * x))}%`;
+        el.style.top = `${Math.max(6, Math.min(94, 50 - 50 * y))}%`;
+      } else {
+        el.style.display = 'none';
+      }
+    }
   }
 
   // ---------- capture ----------
@@ -298,57 +313,32 @@ export default class Capture {
     return c;
   }
 
-  // manual grab (the CAPTURE button) — frames are also grabbed automatically as
-  // you sweep, so this is just for topping up a spot.
-  shoot() {
-    if (this._walking) { this._toast('You moved — turn in place; it captures as you sweep.', true); return; }
-    if (this._grabContinuous()) this._flash();
-    else this._toast('Hold a little steadier — that frame was blurry.', true);
-  }
-
-  // grab the current frame into the sweep if it's sharp; returns true if kept
-  _grabContinuous() {
+  // capture one sharp frame for a target; returns true if kept
+  _snap(target) {
     const frame = this._grabFrame();
     if (!frame) return false;
-    if (this._sharpness(frame) < BLUR_MIN) return false;   // skip blur; catch a steadier frame
-    const az = Math.round(this.az), el = Math.round(this.el);
-    this._shots.push({
-      canvas: frame, az, el, vec: vecFromAzEl(az, el),
-      t: Math.round((typeof performance !== 'undefined' ? performance.now() : 0) - this._t0),
-    });
-    if (this._shots.length > 140) this._shots.shift();     // hard safety cap
+    if (this._sharpness(frame) < BLUR_MIN) return false;   // blurry — wait for a steadier frame
+    target.canvas = frame;
+    target.azShot = Math.round(this.az);
+    target.elShot = Math.round(this.el);
+    target.done = true;
     return true;
   }
 
-  // draw the flattened coverage map: green cells = painted, white dot = where you aim
-  _renderCoverage() {
-    const ctx = this._covCtx;
-    if (!ctx) return;
-    const w = this._covCanvas.width, h = this._covCanvas.height;
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(0, 0, w, h);
-    const X = (az) => ((az % 360 + 360) % 360) / 360 * w;
-    const Y = (el) => (90 - el) / 180 * h;          // +90 top, 0 = horizon (middle), -90 bottom
-
-    // reference lines so "middle = horizon" is unmistakable
-    ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(0, Y(0)); ctx.lineTo(w, Y(0)); ctx.stroke();   // horizon
-    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '8px sans-serif';
-    ctx.fillText('up', 3, 9); ctx.fillText('floor', 3, h - 3);
-
-    for (let i = 0; i < COVERAGE_CELLS.length; i++) {
-      const c = COVERAGE_CELLS[i];
-      ctx.beginPath();
-      ctx.arc(X(c.az), Y(c.el), 2.6, 0, Math.PI * 2);
-      ctx.fillStyle = c._cov ? '#34c759' : 'rgba(255,255,255,0.22)';
-      ctx.fill();
+  // manual shutter — snap the nearest target if we're reasonably on it
+  shoot() {
+    if (this._walking) { this._toast('You moved — turn in place, then aim at the dot.', true); return; }
+    let nextT = null, nextD = Infinity;
+    for (const t of this._targets) {
+      if (t.done) continue;
+      const v = vecFromAzEl(this.az, this.el);
+      const d = v.angleTo(t.vec) / DEG;
+      if (d < nextD) { nextD = d; nextT = t; }
     }
-    // where you're aiming (white, outlined)
-    ctx.beginPath();
-    ctx.arc(X(this.az), Y(this.el), 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.stroke();
+    if (!nextT) return;
+    if (nextD > LOCK_ANGLE * 1.8) { this._toast('Aim closer to the highlighted dot first.', true); return; }
+    if (this._snap(nextT)) this._flash();
+    else this._toast('Hold steadier — that frame was blurry.', true);
   }
 
   // variance of Laplacian — higher = sharper
@@ -372,18 +362,17 @@ export default class Capture {
   }
 
   _finish() {
-    const shots = this._shots.slice();
-    if (shots.length < MIN_SHOTS) {
-      this._toast(`Sweep more of the room first (have ${shots.length}).`, true);
+    const done = this._targets.filter(t => t.done && t.canvas);
+    if (done.length < MIN_DONE) {
+      this._toast(`Capture more spots first (have ${done.length}).`, true);
       return;
     }
     const roomName = this.roomName;
-    // metadata sidecar (yaw/pitch/timestamp per shot) — kept for ordering / future use
-    const meta = shots.map(s => ({ yaw: s.az, pitch: s.el, t: s.t }));
+    const meta = done.map(t => ({ yaw: t.azShot, pitch: t.elShot }));
     this.close();
-    const tag = (v) => (v < 0 ? 'm' : 'p') + String(Math.abs(v)).padStart(3, '0');
-    Promise.all(shots.map(s => new Promise(res =>
-      s.canvas.toBlob(b => res(b ? { blob: b, yaw: s.az, pitch: s.el } : null), 'image/jpeg', 0.9))))
+    const tag = (v) => (v < 0 ? 'm' : 'p') + String(Math.abs(Math.round(v))).padStart(3, '0');
+    Promise.all(done.map(t => new Promise(res =>
+      t.canvas.toBlob(b => res(b ? { blob: b, yaw: t.azShot, pitch: t.elShot } : null), 'image/jpeg', 0.9))))
       .then(items => {
         const frames = items.filter(Boolean).map(it =>
           new File([it.blob], `y${tag(it.yaw)}_p${tag(it.pitch)}.jpg`, { type: 'image/jpeg' }));
@@ -395,12 +384,10 @@ export default class Capture {
   _mkDom() {
     this.root = $('capture-overlay');
     this.video = $('cap-video');
-    this.crosshair = $('cap-crosshair');
     this.box = $('cap-box');
     this.needle = $('cap-needle');
     this.hold = $('cap-hold');
-    this._covCanvas = $('cap-coverage');
-    this._covCtx = this._covCanvas ? this._covCanvas.getContext('2d') : null;
+    this.dotsLayer = $('cap-dots');
     $('cap-shoot').addEventListener('click', () => this.shoot());
     $('cap-close').addEventListener('click', () => this.close());
     $('cap-finish').addEventListener('click', () => this._finish());

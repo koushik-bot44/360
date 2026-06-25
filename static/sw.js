@@ -5,7 +5,7 @@
  * are content-hashed, so we cache them on first use rather than precaching by
  * name. Camera streams aren't fetches; the stitch call is a cross-origin POST
  * to the backend — both pass straight through, never cached. */
-const CACHE = '360tour-v1';
+const CACHE = '360tour-v5';
 const SHELL = ['/', '/builder.html', '/index.html', '/site.webmanifest'];
 
 self.addEventListener('install', (e) => {

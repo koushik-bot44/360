@@ -222,6 +222,298 @@ def _stitch_hugin(image_paths):
         shutil.rmtree(work, ignore_errors=True)
 
 
+def _fps_select(pairs, max_n=40):
+    """Continuous 'paint the sphere' capture can hand us 100+ frames; cpfind on
+    that many would blow Hugin's per-step timeout (and then we'd fall back to the
+    soft orientation paint — the very thing we're replacing). Thin the set to an
+    even spread over the sphere via farthest-point sampling on the shot directions,
+    keeping ~max_n frames. Even spacing preserves overlap for the feature matcher
+    while bounding the solve. (The orientation-paint fallback still uses them all.)"""
+    if len(pairs) <= max_n:
+        return list(pairs)
+    vecs = []
+    for _, (az, el) in pairs:
+        a, e = az * (math.pi / 180), el * (math.pi / 180)
+        ce = math.cos(e)
+        vecs.append((ce * math.sin(a), math.sin(e), -ce * math.cos(a)))
+    vecs = np.asarray(vecs)
+    chosen = [0]
+    mind = np.full(len(pairs), np.inf)
+    for _ in range(max_n - 1):
+        ang = np.arccos(np.clip(vecs @ vecs[chosen[-1]], -1.0, 1.0))
+        mind = np.minimum(mind, ang)
+        mind[chosen] = -1.0
+        chosen.append(int(np.argmax(mind)))
+    return [pairs[i] for i in sorted(chosen)]
+
+
+def _seed_fov(sample_path):
+    """Pick the seed horizontal FOV from the frame's aspect. Phone capture is
+    PORTRAIT (tall), so the horizontal/short-side FOV is much narrower than the 65°
+    landscape guess — seeding 65 over-scales every image and, when features are
+    sparse (blank indoor walls), autooptimiser can't pull it back, so the panorama
+    distorts. ~55° matches real portrait frames; landscape keeps 65. autooptimiser
+    refines the shared value from this seed (and lands closer with a good start)."""
+    im = cv2.imread(str(sample_path))
+    if im is not None and im.shape[0] > im.shape[1]:
+        return 55.0
+    return FOV
+
+
+def _seedgate_cps(pto_text, pairs, max_sep_deg=80.0):
+    """Drop control points linking two frames whose SHOT directions are too far
+    apart to actually share a view (> max_sep). With a ~55° lens two frames only
+    overlap when their optical axes are within ~55°, so a control point between
+    frames seeded 90°–180° apart is physically impossible — it's cpfind matching
+    repeated decor or a blank wall to the OPPOSITE wall, which then drags that
+    frame to the wrong side ('opposite-direction' misplacement). The seed angles
+    are what make these bogus matches detectable. Returns (new_pto_text, dropped)."""
+    dirs = []
+    for _, (az, el) in pairs:
+        a, e = az * (math.pi / 180), el * (math.pi / 180)
+        ce = math.cos(e)
+        dirs.append((ce * math.sin(a), math.sin(e), -ce * math.cos(a)))
+    cosmax = math.cos(max_sep_deg * math.pi / 180)
+    out, dropped = [], 0
+    for ln in pto_text.splitlines():
+        if ln.startswith("c "):
+            mn = re.search(r"\bn(\d+)", ln)
+            mN = re.search(r"\bN(\d+)", ln)
+            if mn and mN:
+                i, j = int(mn.group(1)), int(mN.group(1))
+                if 0 <= i < len(dirs) and 0 <= j < len(dirs):
+                    dot = sum(dirs[i][k] * dirs[j][k] for k in range(3))
+                    if dot < cosmax:                 # separation > max_sep → impossible
+                        dropped += 1
+                        continue
+        out.append(ln)
+    return "\n".join(out) + "\n", dropped
+
+
+def _clamp_to_seed(pto_text, pairs, max_dev=30.0):
+    """After the solve, snap any frame that drifted FAR from its seed back into
+    place. The seed pitch is gravity-accurate and the seed yaw is roughly right, so
+    a frame can't truly be more than ~30° from (seed + a global offset). If the
+    optimiser put one further than that, a bad/false match flipped it to the wrong
+    side ('a right-facing photo ends up on the left') — we reset it to seed+offset.
+
+    The global offset (median of optimised−seed) absorbs any whole-panorama rotation
+    from horizon-levelling/the anchor, so we compare each frame to the CONSENSUS, not
+    to an absolute angle. Real refinements (<30°) are kept. Returns (pto, n_reset)."""
+    seeds = [(-az, el) for _, (az, el) in pairs]
+    cdiff = lambda a, b: ((a - b + 180) % 360) - 180
+    med = lambda xs: sorted(xs)[len(xs) // 2]
+
+    def yp(line):                                   # read y/p from an i-line
+        y = p = None
+        for tk in line.split(" "):
+            if len(tk) > 1 and tk[0] == "y" and tk[1] in "-.0123456789":
+                try: y = float(tk[1:])
+                except ValueError: pass
+            elif len(tk) > 1 and tk[0] == "p" and tk[1] in "-.0123456789":
+                try: p = float(tk[1:])
+                except ValueError: pass
+        return y, p
+
+    opt, idx = [], 0
+    for ln in pto_text.splitlines():
+        if ln.startswith("i "):
+            opt.append(yp(ln)); idx += 1
+    n = min(len(opt), len(seeds))
+    dy = [cdiff(opt[i][0], seeds[i][0]) for i in range(n) if opt[i][0] is not None]
+    dp = [opt[i][1] - seeds[i][1] for i in range(n) if opt[i][1] is not None]
+    if not dy:
+        return pto_text, 0
+    moff, poff = med(dy), (med(dp) if dp else 0.0)
+
+    out, idx, reset = [], 0, 0
+    for ln in pto_text.splitlines():
+        if ln.startswith("i ") and idx < n:
+            sy, sp = seeds[idx]
+            ty, tp = sy + moff, sp + poff           # where consensus says it belongs
+            oy, op_ = opt[idx]
+            bad_y = oy is not None and abs(cdiff(oy, ty)) > max_dev
+            bad_p = op_ is not None and abs(op_ - tp) > max_dev
+            if bad_y or bad_p:
+                toks = ln.split(" ")
+                for k, tk in enumerate(toks):
+                    if bad_y and len(tk) > 1 and tk[0] == "y" and tk[1] in "-.0123456789":
+                        toks[k] = f"y{ty:g}"
+                    elif bad_p and len(tk) > 1 and tk[0] == "p" and tk[1] in "-.0123456789":
+                        toks[k] = f"p{tp:g}"
+                ln = " ".join(toks); reset += 1
+            idx += 1
+        elif ln.startswith("i "):
+            idx += 1
+        out.append(ln)
+    return "\n".join(out) + "\n", reset
+
+
+def _smooth_poles(eq, nadir_deg=16.0, zenith_deg=15.0):
+    """Equirectangular projection collapses the straight-down (nadir) and straight-up
+    (zenith) singularities across the whole image width, so a single floor/ceiling
+    shot smears into ugly radial streaks there. Collapse each pole cap smoothly toward
+    its azimuthal average — fully at the exact pole, fading to none at the cap edge —
+    turning the streaks into a clean disc while leaving real content (cap edge) intact.
+    The nadir cap is larger (floors are plain + shot worst); the zenith cap smaller."""
+    H, W = eq.shape[:2]
+    out = eq.astype(np.float32)
+    for deg, bottom in ((nadir_deg, True), (zenith_deg, False)):
+        rows = max(1, int(round(H * deg / 180.0)))
+        for i in range(rows):
+            y = (H - 1 - i) if bottom else i
+            w = (1.0 - i / rows) ** 2            # 1 at the pole row → ~0 at the cap edge
+            if w <= 1e-3:
+                continue
+            mean = out[y].mean(axis=0)           # this row's azimuthal average colour
+            out[y] = out[y] * (1.0 - w) + mean * w
+    return out.astype(np.uint8)
+
+
+def _stitch_hugin_seeded(pairs, fov=None):
+    """Seeded Hugin stitch: write each frame's captured yaw/pitch as the INITIAL
+    camera orientation into the .pto, then let cpfind + autooptimiser refine from
+    there. This is the gold path for guided captures.
+
+    Why seed: plain `pto_gen` Hugin has no idea where images go, so on low-overlap
+    indoor captures (blank walls) the solve funnels/collapses — which is exactly
+    why the orientation paint was bolted on as a short-circuit. Seeding the known
+    angles puts every image in roughly the right place (no funnel), so the control
+    points only have to *refine* — fixing the sensor-angle noise and the wrong FOV
+    guess that wreck the raw-orientation placement. enblend then hides exposure
+    seams (the orientation paint has no exposure compensation at all).
+
+    `pairs` is a list of (image_path, (az_deg, el_deg)). Convention (determined
+    empirically against ground truth): Hugin yaw = -az, pitch = +el, roll seeded 0
+    then optimised. Returns (equirect BGR or None, reason); any failure → None so
+    the caller falls back to the orientation paint.
+    """
+    if len(pairs) < 2:
+        return None, "need at least 2 oriented images"
+    work = Path(tempfile.mkdtemp(prefix="hseed_"))
+    pto = work / "project.pto"
+
+    env = dict(os.environ)
+    if HUGIN_BIN:                                   # so hugin_executor finds nona/enblend
+        env["PATH"] = HUGIN_BIN + os.pathsep + env.get("PATH", "")
+
+    def run(cmd):
+        cmd = [_hugin_tool(cmd[0]) or cmd[0], *cmd[1:]]
+        subprocess.run(cmd, cwd=work, check=True, timeout=HUGIN_TIMEOUT, env=env,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    try:
+        paths = [str(Path(p).resolve()) for p, _ in pairs]
+        if fov is None:
+            fov = _seed_fov(paths[0])
+        run(["pto_gen", "-o", str(pto), *paths])
+        # seed the shared lens FOV + every image's orientation from capture angles
+        sets = [f"v={fov}"]
+        for i, (_, ori) in enumerate(pairs):
+            az, el = ori
+            sets += [f"y{i}={-az}", f"p{i}={el}", f"r{i}=0"]
+        run(["pto_var", "--set=" + ",".join(sets), "-o", str(pto), str(pto)])
+        # control points (multirow connects the rings densely; celeste drops sky/
+        # uniform points). cpclean then prunes outliers — and because every image is
+        # seeded near its true place, autooptimiser treats any match that would drag
+        # an image far from its seed as the outlier, so cross-room false matches die.
+        run(["cpfind", "--multirow", "--celeste", "-o", str(pto), str(pto)])
+        run(["cpclean", "-o", str(pto), str(pto)])
+        # seed-gate: remove cross-room false matches before they can flip a frame
+        # to the wrong side (the 'opposite-direction' misplacement on blank walls).
+        # Only rewrite when something is actually dropped — rewriting an unchanged
+        # .pto can perturb the solve, and the common dense case drops nothing.
+        txt = pto.read_text()
+        gated, dropped = _seedgate_cps(txt, pairs)
+        if dropped:
+            pto.write_text(gated)
+        ncp = sum(1 for ln in (gated if dropped else txt).splitlines() if ln.startswith("c "))
+        # refine yaw/pitch/roll (anchor auto-handled) STARTING from the seeds
+        # (-n = PTOptimizer mode, not a from-scratch -a). Only ALSO solve the shared
+        # lens FOV when overlap is rich enough to constrain it: with sparse discrete
+        # captures the FOV collapses (frames shrink → float as patches with black
+        # gaps), so there we trust the seeded FOV instead. Dense sweeps keep solving
+        # it (it refines the wrong 65° guess and sharpens). Threshold is per-image.
+        # Refine yaw/pitch/roll from the seeds (-n = PTOptimizer mode). Also solve the
+        # shared lens FOV ONLY when overlap is dense enough to constrain it: a dense
+        # scene NEEDS it (fixing FOV there lets the solve collapse), while a sparse
+        # real capture COLLAPSES if you try (too few points → FOV runs away), so there
+        # we trust the seeded FOV. -m optimises exposure; -l levels the horizon.
+        opt = "y,p,r"
+        dense = ncp >= 25 * len(pairs)
+        if dense:
+            opt += ",v0"
+        run(["pto_var", "--opt=" + opt, "-o", str(pto), str(pto)])
+        run(["autooptimiser", "-n", "-m", "-l", "-o", str(pto), str(pto)])
+        # Flip-corrector for the SPARSE path only (real low-texture rooms). There the
+        # weak solve can flip a frame to the wrong side or warp it, and the seeds are
+        # more trustworthy — snap frames that drifted >30° back to seed+offset. Dense
+        # solves are reliable and left untouched (clamping them fights good refinements).
+        reset = 0
+        if not dense:
+            clamped, reset = _clamp_to_seed(pto.read_text(), pairs, max_dev=30.0)
+            if reset:
+                pto.write_text(clamped)
+        # projection 2 = equirectangular; full 360x180 sphere, AUTO canvas (then we
+        # downscale to TARGET_WIDTH in _to_2to1). AUTO only ballooned to ~11000px
+        # when the FOV collapsed; the conditional-FOV fix above prevents that, so
+        # AUTO now stays sane — and it keeps the correct framing (forcing an exact
+        # canvas shifted the output vertically and broke alignment).
+        run(["pano_modify", "--projection=2", "--fov=360x180",
+             "--canvas=AUTO", "-o", str(pto), str(pto)])
+
+        # Blend (nona warp + enblend multi-band). enblend can bail on imperfect
+        # real captures; retry with Hugin's internal blender (verdandi), tolerant.
+        def stitched():
+            return sorted(glob.glob(str(work / "pano*.tif")) + glob.glob(str(work / "pano*.jpg")))
+        try:
+            run(["hugin_executor", "--stitching", "--prefix=pano", str(pto)])
+        except subprocess.CalledProcessError:
+            for f in stitched():
+                os.remove(f)
+            with open(pto, "a") as fh:                  # switch blender, then retry
+                fh.write("\n#hugin_blender internal\n")
+            run(["hugin_executor", "--stitching", "--prefix=pano", str(pto)])
+
+        outs = stitched()
+        if not outs:
+            return None, "hugin produced no output"
+        img = cv2.imread(outs[0], cv2.IMREAD_COLOR)
+        if img is None:
+            return None, "hugin output unreadable"
+        eq = _to_2to1(img)
+        # funnel guard: a collapsed solve crams everything into a small blob. Judge
+        # by AZIMUTH span, not raw area, so a legitimate horizontal-band capture
+        # (full 360° wide but short — caps unshot) still passes; only a true
+        # collapse (content in a narrow wedge) is rejected → fall back to the paint.
+        filled_mask = cv2.cvtColor(eq, cv2.COLOR_BGR2GRAY) > 24
+        az_cov = float(filled_mask.any(axis=0).mean())     # fraction of 360° covered
+        filled = float(filled_mask.mean())                  # total area fraction
+        if az_cov < 0.85 or filled < 0.22:
+            return None, f"collapsed (az {az_cov:.0%}, fill {filled:.0%}, {ncp} cps)"
+        # kill black gaps (directions that weren't captured) by inpainting them from
+        # their surroundings — seamless, and avoids the alignment seams a paste would
+        # cause. Only true-black (unshot) pixels are touched, not dark real content.
+        holes = (cv2.cvtColor(eq, cv2.COLOR_BGR2GRAY) < 8).astype(np.uint8)
+        gaps = float(holes.mean())
+        if 0 < gaps < 0.35:
+            holes = cv2.dilate(holes, np.ones((5, 5), np.uint8))
+            eq = cv2.inpaint(eq, holes, 6, cv2.INPAINT_TELEA)
+        # nadir/zenith patch: collapse the stretched pole smears into clean discs
+        eq = _smooth_poles(eq)
+        return eq, (f"ok ({ncp} cps, {dropped} cross-room dropped, {reset} reseated, "
+                    f"az {az_cov:.0%}, fill {filled:.0%}, {gaps:.0%} gaps filled)")
+    except subprocess.TimeoutExpired:
+        return None, "hugin timed out"
+    except subprocess.CalledProcessError as e:
+        msg = (e.stderr or b"").decode("utf-8", "ignore").strip().splitlines()
+        return None, f"hugin step failed: {msg[-1] if msg else e}"
+    except Exception as e:                              # never let Hugin crash the request
+        return None, f"hugin seeded error: {e}"
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def _stitch_openstitching(image_paths):
     """Stitch with the OpenStitching package — OpenCV's *detailed* pipeline (SIFT,
     bundle adjustment, spherical warp, gain compensation, multi-band blend) with
@@ -344,11 +636,29 @@ def stitch_panorama(image_paths, orientations=None):
     feats, matches, pair_matches = _feature_diagnostics(imgs)
     debug.update(num_features=feats, num_matches=matches, pair_matches=pair_matches)
 
-    # Orientation-based stitch FIRST when the shots carry their capture angles
-    # (guided capture): place each photo where it was shot → always a complete
-    # sphere, no funnel, no black. Feature stitchers below need overlap and can
-    # leave the low-texture floor black; this can't, because positions are known.
+    # Guided capture: the shots carry the yaw/pitch they were taken at. Use those
+    # angles as a SEED for a real feature-based solve (sharp + exposure-blended),
+    # and only fall back to painting by raw angles if that can't lock.
     if orientations and sum(o is not None for o in orientations) >= max(2, int(len(image_paths) * 0.6)):
+        pairs = [(p, o) for p, o in zip(image_paths, orientations) if o is not None]
+
+        # 1) SEEDED HUGIN — sensor angles place every image (no funnel), control
+        #    points refine them sharp and enblend hides exposure seams. The angle
+        #    noise + FOV guess that wreck raw placement get corrected here. Best
+        #    quality when Hugin is installed; falls through if it can't lock.
+        if _hugin_available():
+            hpano, hreason = _stitch_hugin_seeded(_fps_select(pairs))
+            if hpano is not None:
+                debug.update(engine="hugin-seeded", status="ok", reason="ok",
+                             num_images_used=len(pairs), vertical_fov_deg=180.0,
+                             output_resolution=[int(hpano.shape[1]), int(hpano.shape[0])],
+                             hugin_seeded=hreason)
+                return hpano, debug
+            debug["hugin_seeded_reason"] = hreason
+
+        # 2) ORIENTATION PAINT — place each photo where it was shot. No feature
+        #    alignment (softer, can ghost), but it ALWAYS fills the sphere — never
+        #    funnels or blacks out the low-texture floor. The safety net.
         oimg, placed = _stitch_oriented(image_paths, orientations)
         if oimg is not None:
             debug.update(engine="oriented", status="ok", reason="ok",
