@@ -82,18 +82,27 @@ async def panorama(files: list[UploadFile] = File(...)):
             paths.append(p)
             orientations.append(parse_orientation(f.filename or ""))
 
-        # Keep the last capture's input photos for debugging — preserve the
-        # original angle-encoded filename when present so it can be re-stitched.
+        # ARCHIVE every capture's input photos (angle-named, so any past capture can
+        # be re-stitched without re-shooting) under data/captures/cap_NNNN/ — no
+        # longer overwriting the previous one. data/last_capture mirrors the latest
+        # for convenience. We keep the 15 most recent archives.
+        cap_dir = None
         try:
-            cap_dir = DATA.parent / "last_capture"
-            if cap_dir.exists():
-                shutil.rmtree(cap_dir, ignore_errors=True)
-            cap_dir.mkdir(parents=True, exist_ok=True)
+            caps = DATA.parent / "captures"
+            caps.mkdir(parents=True, exist_ok=True)
+            nums = [int(d.name[4:]) for d in caps.glob("cap_*") if d.name[4:].isdigit()]
+            cap_dir = caps / f"cap_{(max(nums) + 1 if nums else 1):04d}"
+            cap_dir.mkdir()
             for f, p in zip(files, paths):
                 name = Path(f.filename or "").name or p.name
                 shutil.copy2(p, cap_dir / name)
+            last = DATA.parent / "last_capture"          # mirror the most recent
+            shutil.rmtree(last, ignore_errors=True)
+            shutil.copytree(cap_dir, last)
+            for old in sorted(caps.glob("cap_*"))[:-15]:  # keep the 15 newest
+                shutil.rmtree(old, ignore_errors=True)
         except Exception:
-            pass
+            cap_dir = None
 
         equirect, debug = stitch_panorama(paths, orientations=orientations)
         # Coverage: how much of the 2:1 sphere actually has imagery (not the black
@@ -120,6 +129,8 @@ async def panorama(files: list[UploadFile] = File(...)):
         try:
             dbg = DATA.parent / "last_panorama.jpg"
             dbg.write_bytes(buf.tobytes())
+            if cap_dir:                       # keep the result alongside its capture
+                (cap_dir / "result.jpg").write_bytes(buf.tobytes())
         except Exception:
             pass
         data_url = "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
